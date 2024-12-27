@@ -39,6 +39,8 @@ type
 
   FutureVar*[T] = distinct Future[T]
 
+  FutureUntracked*[T] = Future[T]
+
   FutureError* = object of Defect
     cause*: FutureBase
 
@@ -136,6 +138,9 @@ proc newFutureVar*[T](fromProc = "unspecified"): owned(FutureVar[T]) =
   result = typeof(result)(fo)
   when isFutureLoggingEnabled: logFutureStart(Future[T](result))
 
+proc newFutureUntracked*[T](fromProc = "unspecified"): FutureUntracked[T] =
+  newFuture[T](fromProc)
+
 proc clean*[T](future: FutureVar[T]) =
   ## Resets the `finished` status of `future`.
   Future[T](future).finished = false
@@ -162,11 +167,13 @@ proc checkFinished[T](future: Future[T]) =
       err.cause = future
       raise err
 
-proc call(callbacks: var CallbackList) =
+proc call(callbacks: var CallbackList) {.raises: [].} =
   var current = callbacks
   while true:
     if not current.function.isNil:
-      callSoon(current.function)
+      # XXX make callbacks {.raise: [].}
+      {.cast(raises: []).}:
+        callSoon(current.function)
 
     if current.next.isNil:
       break

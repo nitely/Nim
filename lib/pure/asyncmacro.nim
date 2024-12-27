@@ -49,9 +49,10 @@ template createCb(futTyp, strName, identName, futureVarCompletions: untyped) =
     except:
       futureVarCompletions
       if fut.finished:
-        # Take a look at tasyncexceptions for the bug which this fixes.
-        # That test explains it better than I can here.
-        raise
+        {.cast(raises: []).}:
+          # Take a look at tasyncexceptions for the bug which this fixes.
+          # That test explains it better than I can here.
+          raise
       else:
         fut.fail(getCurrentException())
   {.pop.}
@@ -158,6 +159,9 @@ proc verifyReturnType(typeName: string, node: NimNode = nil) =
     error("Expected return type of 'Future' got '$1'" %
           typeName, node)
 
+template isUntracked[T](f: Future[T]): bool =
+  getTypeInst(getType(typeof f))[1][0] == getTypeInst(getType(FutureUntracked[T]))[1][0]
+
 template await*(f: typed): untyped {.used.} =
   static:
     error "await expects Future[T], got " & $typeof(f)
@@ -171,7 +175,11 @@ template await*[T](f: Future[T]): auto {.used.} =
     var internalTmpFuture: FutureBase = f
     yield internalTmpFuture
     {.line: instantiationInfo(fullPaths = true).}:
-      (cast[typeof(f)](internalTmpFuture)).read()
+      when f.isUntracked:
+        {.cast(raises: []).}:
+          (cast[typeof(f)](internalTmpFuture)).read()
+      else:
+        (cast[typeof(f)](internalTmpFuture)).read()
   else:
     macro errorAsync(futureError: Future[T]) =
       error(
@@ -303,7 +311,7 @@ proc asyncSingleProc(prc: NimNode): NimNode =
       newVarStmt(retFutureSym,
         newCall(
           newNimNode(nnkBracketExpr, prc.body).add(
-            newIdentNode("newFuture"),
+            newIdentNode("newFutureUntracked"),
             subRetType),
         newLit(prcName)))) # Get type from return type of this proc
 
