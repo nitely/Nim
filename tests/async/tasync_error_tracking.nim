@@ -7,6 +7,18 @@ proc err(throw: bool) =
     raise newException(MyError, "myerr")
 
 block:
+  proc bar() {.async.} =
+    err(false)
+  
+  proc foo() {.async.} =
+    await bar()
+
+  proc main {.async, raises: [MyError].} =
+    await foo()
+
+  waitFor main()
+
+block:
   proc foo() {.async, raises: [MyError].} =
     err(false)
 
