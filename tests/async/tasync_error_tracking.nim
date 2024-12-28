@@ -2,12 +2,13 @@ import std/asyncdispatch
 
 type MyError = object of ValueError
 
-proc err =
-  raise newException(MyError, "myerr")
+proc err(throw: bool) =
+  if throw:
+    raise newException(MyError, "myerr")
 
 block:
   proc foo() {.async, raises: [MyError].} =
-    err()
+    err(false)
 
   proc main {.async.} =
     await foo()
@@ -16,7 +17,7 @@ block:
 
 block:
   proc foo() {.async, raises: [MyError].} =
-    err()
+    err(false)
 
   proc bar(fut: FutureTracked[void, (MyError,)]) {.async, raises: [MyError].} =
     await fut
