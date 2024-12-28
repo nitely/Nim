@@ -416,13 +416,13 @@ macro multisync*(prc: untyped): untyped =
 macro trackFuture*(prc: typed): untyped =
   # XXX error instead of asserts
   #echo repr getRaisesList(prc[0])
-  doAssert prc.kind == nnkCall
+  assert prc.kind == nnkCall
   let procImpl = getTypeImpl(prc[0])
-  doAssert procImpl.kind == nnkProcTy
+  assert procImpl.kind == nnkProcTy
   let retTyp = procImpl.params[0]
-  doAssert retTyp.kind == nnkBracketExpr
+  assert retTyp.kind == nnkBracketExpr
   let fut = repr(retTyp[0])
-  doAssert fut == "FutureUntracked", fut
+  assert fut == "FutureUntracked", fut
   let baseTyp = retTyp[1]
   let raisesList = getRaisesList(prc[0])
   let exTyp = if raisesList.len == 0:
