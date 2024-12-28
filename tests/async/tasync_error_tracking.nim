@@ -10,7 +10,7 @@ block:
   proc foo() {.async, raises: [MyError].} =
     err(false)
 
-  proc main {.async.} =
+  proc main {.async, raises: [MyError].} =
     await foo()
 
   waitFor main()
@@ -22,7 +22,7 @@ block:
   proc bar(fut: FutureTracked[void, (MyError,)]) {.async, raises: [MyError].} =
     await fut
 
-  proc main {.async.} =
+  proc main {.async, raises: [MyError].} =
     let fooFut = trackFuture foo()
     await bar(fooFut)
 

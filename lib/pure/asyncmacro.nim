@@ -335,7 +335,7 @@ proc asyncSingleProc(prc: NimNode): NimNode =
   # Add discardable pragma.
   if returnType.kind == nnkEmpty:
     # xxx consider removing `owned`? it's inconsistent with non-void case
-    result.params[0] = quote do: owned(Future[void])
+    result.params[0] = quote do: owned(FutureUntracked[void])
 
   # based on the yglukhov's patch to chronos: https://github.com/status-im/nim-chronos/pull/47
   if procBody.kind != nnkEmpty:
@@ -422,7 +422,7 @@ macro trackFuture*(prc: typed): untyped =
   let retTyp = procImpl.params[0]
   doAssert retTyp.kind == nnkBracketExpr
   let fut = repr(retTyp[0])
-  doAssert fut == "Future", fut
+  doAssert fut == "FutureUntracked", fut
   let baseTyp = retTyp[1]
   let raisesList = getRaisesList(prc[0])
   let exTyp = if raisesList.len == 0:
