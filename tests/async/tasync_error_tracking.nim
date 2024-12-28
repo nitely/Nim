@@ -27,3 +27,13 @@ block:
     await bar(fooFut)
 
   waitFor main()
+
+block:
+  template good =
+    proc foo() {.async, raises: [MyError].} =
+      err(false)
+  template missingRaise =
+    proc foo() {.async, raises: [].} =
+      err(false)
+  doAssert compiles(good())
+  doAssert not compiles(missingRaise())
