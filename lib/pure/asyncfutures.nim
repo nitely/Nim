@@ -7,7 +7,7 @@
 #    distribution, for details about the copyright.
 #
 
-import std/[os, sets, tables, strutils, times, heapqueue, options, deques, cstrutils, typetraits]
+import std/[os, macros, sets, tables, strutils, times, heapqueue, options, deques, cstrutils, typetraits]
 
 import system/stacktraces
 
@@ -40,6 +40,8 @@ type
   FutureVar*[T] = distinct Future[T]
 
   FutureUntracked*[T] = Future[T]
+
+  FutureTracked*[T, E] = distinct Future[T]
 
   FutureError* = object of Defect
     cause*: FutureBase
@@ -390,6 +392,28 @@ proc read*[T](future: Future[T] | FutureVar[T]): lent T =
 
 proc read*(future: Future[void] | FutureVar[void]) =
   readImpl(future, void)
+
+macro readTrackedImpl(future: FutureTracked): untyped =
+  # XXX refactor readImpl
+  let t = getTypeInst(future)[1]
+  let e = getTypeInst(future)[2]
+  let types = getType(e)
+  var raisesList = newNimNode(nnkBracket)
+  for r in types[1..^1]:
+    raisesList.add(r)
+  #echo repr raisesList
+  #echo repr t
+  let theCast = quote do:
+    cast(raises: `raisesList`)
+  quote do:
+    {.`theCast`.}:
+      readImpl(`future`, `t`)
+
+proc read*[T, E](future: FutureTracked[T, E]): lent T =
+  readTrackedImpl(future)
+
+proc read*[E](future: FutureTracked[void, E]) =
+  readTrackedImpl(future)
 
 proc readError*[T](future: Future[T]): ref Exception =
   ## Retrieves the exception stored in `future`.
