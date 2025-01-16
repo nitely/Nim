@@ -46,7 +46,7 @@ block:
 
 block:
   type FooBar = object
-    fcb: proc(): synced Future[void] {.closure, gcsafe, raises: [].}
+    fcb: proc: asynced Future[void] {.closure, gcsafe, raises: [].}
 
   proc bar {.async.} =
     discard
@@ -57,7 +57,7 @@ block:
 
 block:
   type FooBar = object
-    fcb: proc(): synced Future[void] {.closure, gcsafe.}
+    fcb: proc: asynced Future[void] {.closure, gcsafe.}
 
   proc bar {.async.} =
     discard
@@ -135,12 +135,12 @@ block:
   doAssert not compiles(bad())
 
 block:
-  proc bar() {.async.} =
+  proc bar {.async.} =
     err(false)
 
   # XXX We could check all returns are from async procs
   #     and if so use the inferred proc raises
-  proc foo(): Future[void] =
+  proc foo: Future[void] =
     bar()
 
   template good =
@@ -151,3 +151,13 @@ block:
       await foo()
   doAssert compiles(good())
   doAssert not compiles(bad())
+
+block:
+  proc bar {.async.} =
+    err(false)
+
+  proc foo: asynced Future[void] =
+    bar()
+
+  proc main {.async, raises: [MyError].} =
+    await foo()
