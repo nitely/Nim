@@ -45,11 +45,19 @@ block:
     discard
 
 block:
-  # we cannot tell if fcb is an async proc
-  # or a closure that returns a user created newFuture()
-  # that can raise anything
   type FooBar = object
-    fcb: proc(): Future[void] {.closure, gcsafe.}
+    fcb: proc(): synced Future[void] {.closure, gcsafe, raises: [].}
+
+  proc bar {.async.} =
+    discard
+
+  proc foo {.async, raises: [].} =
+    var f = FooBar(fcb: bar)
+    await f.fcb()
+
+block:
+  type FooBar = object
+    fcb: proc(): synced Future[void] {.closure, gcsafe.}
 
   proc bar {.async.} =
     discard

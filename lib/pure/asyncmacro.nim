@@ -159,21 +159,15 @@ proc verifyReturnType(typeName: string, node: NimNode = nil) =
     error("Expected return type of 'Future' got '$1'" %
           typeName, node)
 
-proc isAsyncPrc0(n: NimNode): bool =
-  if n.kind == nnkBlockStmt and n[0].strVal == "asynctrack":
-    return true
-  if n.kind in RoutineNodes:
-    return false
-  for i in 0 .. n.len-1:
-    if isAsyncPrc0(n[i]):
-      return true
-  return false
-
 proc isAsyncPrc(n: NimNode): bool =
-  for i in 0 .. n.len-1:
-    if isAsyncPrc0(n[i]):
-      return true
-  return false
+  if n.getTypeInst.kind notin {nnkProcTy} + RoutineNodes:
+    return false
+  return repr(n.getTypeInst.params[0][0]) == "InternalFuture"
+
+proc hasRaises(n: NimNode): bool =
+  if n.getTypeInst.kind notin {nnkProcTy} + RoutineNodes:
+    return false
+  return repr(getRaisesList(n)) != "[UncomputedEffects]"
 
 macro withRaises[T](f: Future[T], body: untyped): untyped =
   #echo repr f.kind
@@ -186,12 +180,16 @@ macro withRaises[T](f: Future[T], body: untyped): untyped =
     else:
       nil
   of nnkCall:
-    if f[0].kind == nnkSym: f[0] else: nil
+    if f[0].kind == nnkSym:
+      f[0]
+    elif f[0].kind == nnkDotExpr and f[0][1].kind == nnkSym:
+      f[0][1]
+    else:
+      nil
   else:
     nil
   #echo repr prcSym
-  #echo repr prcSym.getImpl
-  if prcSym != nil and isAsyncPrc(prcSym.getImpl):
+  if prcSym != nil and isAsyncPrc(prcSym) and hasRaises(prcSym):
     let raisesList = getRaisesList(prcSym)
     var raisesListTyp = newNimNode(nnkBracket)
     if raisesList.len > 0:
@@ -213,13 +211,10 @@ template await*[T](f: Future[T]): auto {.used.} =
   when not defined(nimHasTemplateRedefinitionPragma):
     {.pragma: redefine.}
   template yieldFuture {.redefine.} = yield FutureBase()
-
   when compiles(yieldFuture):
     var internalTmpFuture: FutureBase = f
     yield internalTmpFuture
-    {.line: instantiationInfo(fullPaths = true).}:
-      withRaises f:
-        cast[typeof(f)](internalTmpFuture).read()
+    (cast[typeof(f)](internalTmpFuture)).read()
   else:
     macro errorAsync(futureError: Future[T]) =
       error(
@@ -238,13 +233,24 @@ template await*[T, E](f: FutureEx[T, E]): untyped =
   else:
     {.error: "await is only available within {.async.}".}
 
+template await*[T](f: InternalFuture[T]): auto {.used.} =
+  template yieldFuture = yield FutureBase()
+  when compiles(yieldFuture):
+    var internalTmpFuture: FutureBase = f
+    yield internalTmpFuture
+    {.line: instantiationInfo(fullPaths = true).}:
+      withRaises f:
+        cast[typeof(f)](internalTmpFuture).read()
+  else:
+    {.error: "await is only available within {.async.}".}
+
 proc asyncSingleProc(prc: NimNode): NimNode =
   ## This macro transforms a single procedure into a closure iterator.
   ## The `async` macro supports a stmtList holding multiple async procedures.
   if prc.kind == nnkProcTy:
     result = prc
     if prc[0][0].kind == nnkEmpty:
-      result[0][0] = quote do: Future[void]
+      result[0][0] = quote do: asynced Future[void]
     return result
 
   if prc.kind in RoutineNodes and prc.name.kind != nnkEmpty:
@@ -303,6 +309,7 @@ proc asyncSingleProc(prc: NimNode): NimNode =
   # ->   <proc_body>
   # ->   complete(retFutParam, result)
   var iteratorNameSym = genSym(nskIterator, $prcName & " (Async)")
+  iteratorNameSym.copyLineInfo(prc)
   var needsCompletionSym = genSym(nskVar, "needsCompletion")
   var ctx = Context()
   var procBody = processBody(ctx, prc.body, needsCompletionSym, retFutParamSym, futureVarIdents)
@@ -361,7 +368,7 @@ proc asyncSingleProc(prc: NimNode): NimNode =
       newVarStmt(retFutureSym,
         newCall(
           newNimNode(nnkBracketExpr, prc.body).add(
-            newIdentNode("newFuture"),
+            newIdentNode("newInternalFuture"),
             subRetType),
         newLit(prcName)))) # Get type from return type of this proc
 
@@ -374,8 +381,9 @@ proc asyncSingleProc(prc: NimNode): NimNode =
   result = prc
   # Add discardable pragma.
   if returnType.kind == nnkEmpty:
-    # xxx consider removing `owned`? it's inconsistent with non-void case
-    result.params[0] = quote do: owned(Future[void])
+    result.params[0] = quote do: asynced Future[void]
+  else:
+    result.params[0] = quote do: asynced `returnType`
 
   # based on the yglukhov's patch to chronos: https://github.com/status-im/nim-chronos/pull/47
   if procBody.kind != nnkEmpty:
@@ -461,7 +469,7 @@ macro toFutureEx*(prc: typed): untyped =
       error("async proc call expected", prc)
   check prc.kind == nnkCall
   check prc[0].kind == nnkSym
-  check isAsyncPrc(prc[0].getImpl)
+  check isAsyncPrc(prc[0])
   let procImpl = getTypeImpl(prc[0])
   check procImpl.kind == nnkProcTy
   let retTyp = procImpl.params[0]
@@ -475,3 +483,6 @@ macro toFutureEx*(prc: typed): untyped =
     exTyp.add r
   result = quote do:
     FutureEx[`baseTyp`, `exTyp`](`prc`)
+
+template asynced*[T](f: typedesc[Future[T]]): untyped =
+    InternalFuture[T]

@@ -41,6 +41,8 @@ type
 
   FutureEx*[T, E] = distinct Future[T]
 
+  InternalFuture*[T] = ref object of Future[T]
+
   FutureError* = object of Defect
     cause*: FutureBase
 
@@ -127,6 +129,9 @@ proc newFuture*[T](fromProc: string = "unspecified"): owned(Future[T]) =
   ## that this future belongs to, is a good habit as it helps with debugging.
   setupFutureBase(fromProc)
   when isFutureLoggingEnabled: logFutureStart(result)
+
+proc newInternalFuture*[T](fromProc: string = "unspecified"): owned(InternalFuture[T]) =
+  setupFutureBase(fromProc)
 
 proc newFutureVar*[T](fromProc = "unspecified"): owned(FutureVar[T]) =
   ## Create a new `FutureVar`. This Future type is ideally suited for
