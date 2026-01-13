@@ -7,7 +7,7 @@
 #    distribution, for details about the copyright.
 #
 
-import std/[os, sets, tables, strutils, times, heapqueue, options, deques, cstrutils, typetraits]
+import std/[os, macros, sets, tables, strutils, strformat, times, heapqueue, options, deques, cstrutils, typetraits]
 
 import system/stacktraces
 
@@ -38,6 +38,10 @@ type
     value: T                            ## Stored value
 
   FutureVar*[T] = distinct Future[T]
+
+  FutureEx*[T, E] = distinct Future[T]
+
+  InternalFuture*[T] = ref object of Future[T]
 
   FutureError* = object of Defect
     cause*: FutureBase
@@ -126,6 +130,9 @@ proc newFuture*[T](fromProc: string = "unspecified"): owned(Future[T]) =
   setupFutureBase(fromProc)
   when isFutureLoggingEnabled: logFutureStart(result)
 
+proc newInternalFuture*[T](fromProc: string = "unspecified"): owned(InternalFuture[T]) =
+  setupFutureBase(fromProc)
+
 proc newFutureVar*[T](fromProc = "unspecified"): owned(FutureVar[T]) =
   ## Create a new `FutureVar`. This Future type is ideally suited for
   ## situations where you want to avoid unnecessary allocations of Futures.
@@ -141,7 +148,7 @@ proc clean*[T](future: FutureVar[T]) =
   Future[T](future).finished = false
   Future[T](future).error = nil
 
-proc checkFinished[T](future: Future[T]) =
+proc checkFinished[T](future: Future[T]) {.raises: [].} =
   ## Checks whether `future` is finished. If it is then raises a
   ## `FutureError`.
   when not defined(release):
@@ -162,11 +169,13 @@ proc checkFinished[T](future: Future[T]) =
       err.cause = future
       raise err
 
-proc call(callbacks: var CallbackList) =
+proc call(callbacks: var CallbackList) {.raises: [].} =
   var current = callbacks
   while true:
     if not current.function.isNil:
-      callSoon(current.function)
+      # XXX make callbacks {.raise: [].}
+      {.cast(raises: []).}:
+        callSoon(current.function)
 
     if current.next.isNil:
       break
@@ -293,12 +302,11 @@ template getFilenameProcname(entry: StackTraceEntry): (string, string) =
   else:
     ($entry.filename, $entry.procname)
 
-proc format(entry: StackTraceEntry): string =
+proc format(entry: StackTraceEntry): string {.raises: [].} =
   let (filename, procname) = getFilenameProcname(entry)
-  let left = "$#($#)" % [filename, $entry.line]
-  result = spaces(2) & "$# $#\n" % [left, procname]
+  result = &"{spaces(2)}{filename}({$entry.line}) {procname}\n"
 
-proc isInternal(entry: StackTraceEntry): bool =
+proc isInternal(entry: StackTraceEntry): bool {.raises: [].} =
   # --excessiveStackTrace:off
   const internals = [
     "asyncdispatch.nim",
@@ -311,7 +319,7 @@ proc isInternal(entry: StackTraceEntry): bool =
       return true
   return false
 
-proc `$`*(stackTraceEntries: seq[StackTraceEntry]): string =
+proc `$`*(stackTraceEntries: seq[StackTraceEntry]): string {.raises: [].} =
   result = ""
   when defined(nimStackTraceOverride):
     let entries = addDebuggingInfo(stackTraceEntries)
@@ -383,6 +391,28 @@ proc read*[T](future: Future[T] | FutureVar[T]): lent T =
 
 proc read*(future: Future[void] | FutureVar[void]) =
   readImpl(future, void)
+
+macro readTrackedImpl(future: FutureEx): untyped =
+  # XXX refactor readImpl
+  let t = getTypeInst(future)[1]
+  let e = getTypeInst(future)[2]
+  let types = getType(e)
+  var raisesList = newNimNode(nnkBracket)
+  for r in types[1..^1]:
+    raisesList.add(r)
+  #echo repr raisesList
+  #echo repr t
+  let raisesCast = quote do:
+    cast(raises: `raisesList`)
+  quote do:
+    {.`raisesCast`.}:
+      readImpl(`future`, `t`)
+
+proc read*[T, E](future: FutureEx[T, E]): lent T =
+  readTrackedImpl(future)
+
+proc read*[E](future: FutureEx[void, E]) =
+  readTrackedImpl(future)
 
 proc readError*[T](future: Future[T]): ref Exception =
   ## Retrieves the exception stored in `future`.
