@@ -188,7 +188,7 @@ proc symToSuggest*(g: ModuleGraph; s: PSym, isLocal: bool, section: IdeCmd, info
     when defined(nimsuggest) and not defined(noDocgen) and not defined(leanCompiler):
       if extractDocs:
         result.doc = extractDocComment(g, s)
-  if s.kind == skModule and s.ast.len != 0 and section != ideHighlight:
+  if s.kind == skModule and s.ast.len != 0 and section != ideHighlight and not useSuppliedInfo:
     result.filePath = toFullPath(g.config, s.ast[0].info)
     result.line = 1
     result.column = 0

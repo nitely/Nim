@@ -879,12 +879,14 @@ proc findSymData(graph: ModuleGraph, trackPos: TLineInfo, isGenericInstance: boo
   result = nil
   let db = graph.fileSymbols(trackPos.fileIndex).deduplicateSymInfoPair(isGenericInstance)
   doAssert(db.fileIndex == trackPos.fileIndex)
+  var found = -1
   for i in db.lineInfo.low..db.lineInfo.high:
-    if isTracked(db.lineInfo[i], TinyLineInfo(line: trackPos.line, col: trackPos.col), db.sym[i].name.s.len):
-      var res = db.getSymInfoPair(i)
-      new(result)
-      result[] = res
-      break
+    if isTracked(db.lineInfo[i], TinyLineInfo(line: trackPos.line, col: trackPos.col), db.sym[i].name.s.len) and
+        (found < 0 or db.lineInfo[i].col > db.lineInfo[found].col):
+      found = i
+  if found >= 0:
+    new(result)
+    result[] = db.getSymInfoPair(found)
 
 func isInRange*(current, startPos, endPos: TinyLineInfo, tokenLen: int): bool =
   result =
@@ -924,7 +926,8 @@ proc markDirtyIfNeeded(graph: ModuleGraph, file: string, originalFileIdx: FileIn
     myLog fmt "No changes in file {file} compared to last compilation"
 
 proc suggestResult(graph: ModuleGraph, sym: PSym, info: TLineInfo,
-                   defaultSection = ideNone, endLine: uint16 = 0, endCol = 0) =
+                   defaultSection = ideNone, endLine: uint16 = 0, endCol = 0,
+                   useSuppliedInfo = false) =
   let section = if defaultSection != ideNone:
                   defaultSection
                 elif sym.info.exactEquals(info):
@@ -933,6 +936,7 @@ proc suggestResult(graph: ModuleGraph, sym: PSym, info: TLineInfo,
                   ideUse
   let suggest = symToSuggest(graph, sym, isLocal=false, section,
                              info, 100, PrefixMatch.None, false, 0,
+                             useSuppliedInfo = useSuppliedInfo,
                              endLine = endLine, endCol = endCol)
   suggestResult(graph.config, suggest)
 
@@ -1183,7 +1187,7 @@ proc executeNoHooksV3(cmd: IdeCmd, file: AbsoluteFile, dirtyfile: AbsoluteFile, 
           usages.add(fs.getSymInfoPair(i))
       myLog fmt "Found {usages.len} usages in {file.string}"
       for s in usages:
-        graph.suggestResult(s.sym, s.info)
+        graph.suggestResult(s.sym, s.info, useSuppliedInfo = true)
   of ideRecompile:
     graph.recompileFullProject()
   of ideChanged:

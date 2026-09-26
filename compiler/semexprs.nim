@@ -1556,10 +1556,10 @@ proc tryReadingTypeField(c: PContext, n: PNode, i: PIdent, ty: PType): PNode =
       ty = ty[0]         # enum inheritance
     if f != nil:
       result = newSymNode(f)
-      result.info = n.info
+      result.info = n[1].info
       result.typ = ty
-      markUsed(c, n.info, f)
-      onUse(n.info, f)
+      markUsed(c, n[1].info, f)
+      onUse(n[1].info, f)
   of tyObject, tyTuple:
     if ty.n != nil and ty.n.kind == nkRecList:
       let field = lookupInRecord(ty.n, i)
@@ -3121,7 +3121,7 @@ proc semExport(c: PContext, n: PNode): PNode =
           reexportSym(c, it)
           result.add newSymNode(it, a.info)
           specialSyms(c, it)
-      markUsed(c, n.info, s)
+      markUsed(c, a.info, s)
     else:
       while s != nil:
         if s.kind == skEnumField:
@@ -3130,7 +3130,7 @@ proc semExport(c: PContext, n: PNode): PNode =
         if s.kind in ExportableSymKinds+{skModule} and sfError notin s.flags:
           result.add(newSymNode(s, a.info))
           reexportSym(c, s)
-          markUsed(c, n.info, s)
+          markUsed(c, a.info, s)
           specialSyms(c, s)
           if s.kind == skType and sfPure notin s.flags:
             var etyp = s.typ
