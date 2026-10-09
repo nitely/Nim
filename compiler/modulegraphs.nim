@@ -117,10 +117,9 @@ type
                                   # derived env-field syms that no module defines
 
     packageSyms*: TStrTable
-    deps*: IntSet # the dependency graph or potentially its transitive closure.
+    deps*: IntSet # the dependency graph
     importDeps*: Table[FileIndex, seq[FileIndex]] # explicit import module dependencies
     suggestMode*: bool # whether we are in nimsuggest mode or not.
-    invalidTransitiveClosure: bool
     interactive*: bool
     withinSystem*: bool # in system.nim or a module imported by system.nim
     inclToMod*: Table[FileIndex, FileIndex] # mapping of include file to the
@@ -982,9 +981,6 @@ proc addDep*(g: ModuleGraph; m: PSym, dep: FileIndex) =
   assert m.position == m.info.fileIndex.int32
   if g.suggestMode:
     g.deps.incl m.position.dependsOn(dep.int)
-    # we compute the transitive closure later when querying the graph lazily.
-    # this improves efficiency quite a lot:
-    #invalidTransitiveClosure = true
 
 proc addIncludeDep*(g: ModuleGraph; module, includeFile: FileIndex) =
   discard hasKeyOrPut(g.inclToMod, includeFile, module)
@@ -997,15 +993,6 @@ proc parentModule*(g: ModuleGraph; fileIdx: FileIndex): FileIndex =
     result = fileIdx
   else:
     result = g.inclToMod.getOrDefault(fileIdx)
-
-proc transitiveClosure(g: var IntSet; n: int) =
-  # warshall's algorithm
-  for k in 0..<n:
-    for i in 0..<n:
-      for j in 0..<n:
-        if i != j and not g.contains(i.dependsOn(j)):
-          if g.contains(i.dependsOn(k)) and g.contains(k.dependsOn(j)):
-            g.incl i.dependsOn(j)
 
 proc markDirty*(g: ModuleGraph; fileIdx: FileIndex) =
   let m = g.getModule fileIdx
@@ -1027,14 +1014,16 @@ proc markClientsDirty*(g: ModuleGraph; fileIdx: FileIndex) =
   # we need to mark its dependent modules D as dirty right away because after
   # nimsuggest is done with this module, the module's dirty flag will be
   # cleared but D still needs to be remembered as 'dirty'.
-  if g.invalidTransitiveClosure:
-    g.invalidTransitiveClosure = false
-    transitiveClosure(g.deps, g.ifaces.len)
-
-  # every module that *depends* on this file is also dirty:
-  for i in 0i32..<g.ifaces.len.int32:
-    if g.deps.contains(i.dependsOn(fileIdx.int)):
-      g.markDirty(FileIndex(i))
+  # every module that *depends* on this file, directly or not, is also dirty:
+  var reached = initIntSet()
+  var pending = @[fileIdx.int]
+  while pending.len > 0:
+    let dep = pending.pop()
+    for i in 0..<g.ifaces.len:
+      if i notin reached and g.deps.contains(i.dependsOn(dep)):
+        reached.incl i
+        g.markDirty(FileIndex(i))
+        pending.add i
 
 proc needsCompilation*(g: ModuleGraph): bool =
   # every module that *depends* on this file is also dirty:
