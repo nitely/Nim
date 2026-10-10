@@ -824,9 +824,9 @@ proc liftCapturedVars(n: PNode; owner: PSym; d: var DetectionPass;
         var body = transformBody(d.graph, d.idgen, s, {})
         body = liftCapturedVars(body, s, d, c)
         if c.envVars.getOrDefault(s.id).isNil:
-          s.transformedBody = body
+          d.graph.setTransformedBody(s, body)
         else:
-          s.transformedBody = newTree(nkStmtList, rawClosureCreation(s, d, c, n.info), body)
+          d.graph.setTransformedBody(s, newTree(nkStmtList, rawClosureCreation(s, d, c, n.info), body))
           finishClosureCreation(s, d, c, n.info, s.transformedBody)
         c.inContainer = oldInContainer
 

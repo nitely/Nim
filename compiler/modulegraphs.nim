@@ -119,10 +119,9 @@ type
                                   # derived env-field syms that no module defines
 
     packageSyms*: TStrTable
-    deps*: IntSet # the dependency graph or potentially its transitive closure.
+    deps*: IntSet # the dependency graph
     importDeps*: Table[FileIndex, seq[FileIndex]] # explicit import module dependencies
     suggestMode*: bool # whether we are in nimsuggest mode or not.
-    invalidTransitiveClosure: bool
     interactive*: bool
     withinSystem*: bool # in system.nim or a module imported by system.nim
     inclToMod*: Table[FileIndex, FileIndex] # mapping of include file to the
@@ -145,6 +144,7 @@ type
     compilingModule*: int32
     suggestErrors*: Table[FileIndex, seq[Suggest]]
     compileTimeVars*: seq[tuple[module: PSym; section: PNode]]
+    transformedProcs: seq[PSym]
     methods*: seq[tuple[methods: seq[PSym], dispatcher: PSym]] # needs serialization!
     bucketTable*: CountTable[ItemId]
     objectTree*: Table[ItemId, seq[tuple[depth: int, value: PType]]]
@@ -1023,9 +1023,6 @@ proc addDep*(g: ModuleGraph; m: PSym, dep: FileIndex) =
   assert m.position == m.info.fileIndex.int32
   if g.suggestMode:
     g.deps.incl m.position.dependsOn(dep.int)
-    # we compute the transitive closure later when querying the graph lazily.
-    # this improves efficiency quite a lot:
-    #invalidTransitiveClosure = true
 
 proc addIncludeDep*(g: ModuleGraph; module, includeFile: FileIndex) =
   discard hasKeyOrPut(g.inclToMod, includeFile, module)
@@ -1038,15 +1035,6 @@ proc parentModule*(g: ModuleGraph; fileIdx: FileIndex): FileIndex =
     result = fileIdx
   else:
     result = g.inclToMod.getOrDefault(fileIdx)
-
-proc transitiveClosure(g: var IntSet; n: int) =
-  # warshall's algorithm
-  for k in 0..<n:
-    for i in 0..<n:
-      for j in 0..<n:
-        if i != j and not g.contains(i.dependsOn(j)):
-          if g.contains(i.dependsOn(k)) and g.contains(k.dependsOn(j)):
-            g.incl i.dependsOn(j)
 
 proc markDirty*(g: ModuleGraph; fileIdx: FileIndex) =
   let m = g.getModule fileIdx
@@ -1061,12 +1049,20 @@ proc delModuleKeys[V](t: var Table[ItemId, V]; module: int32) =
     if id.module == module: stale.add id
   for id in stale: t.del id
 
+proc delModuleEntries(t: var Table[ItemId, PSym]; module: int32) =
+  var stale: seq[ItemId] = @[]
+  for id, s in t:
+    if id.module == module or s.itemId.module == module: stale.add id
+  for id in stale: t.del id
+
 proc forgetCompilation*(g: ModuleGraph; m: PSym) =
   let module = m.position.int32
   g.ifaces[module].converters.setLen 0
   g.ifaces[module].patterns.setLen 0
   g.ifaces[module].pureEnums.setLen 0
   g.nifExpansions.del(module)
+  g.typeInstCache.delModuleKeys(module)
+  g.procInstCache.delModuleKeys(module)
   for insts in mvalues(g.typeInstCache):
     var kept: seq[PType] = @[]
     for t in insts:
@@ -1080,8 +1076,8 @@ proc forgetCompilation*(g: ModuleGraph; m: PSym) =
   for db in mvalues(g.suggestSymbols):
     db.removeOriginModule(module)
   for ops in mitems(g.attachedOps):
-    ops.delModuleKeys(module)
-  g.enumToStringProcs.delModuleKeys(module)
+    ops.delModuleEntries(module)
+  g.enumToStringProcs.delModuleEntries(module)
   var staleCanon: seq[SigHash] = @[]
   for h, t in g.canonTypes:
     if t.itemId.module == module: staleCanon.add h
@@ -1111,6 +1107,15 @@ proc forgetCompileTimeVars*(g: ModuleGraph; m: PSym) =
     if it.module != m: kept.add it
   g.compileTimeVars = kept
 
+proc setTransformedBody*(g: ModuleGraph; prc: PSym; body: PNode) =
+  prc.transformedBody = body
+  if g.suggestMode: g.transformedProcs.add prc
+
+proc forgetTransformedBodies*(g: ModuleGraph) =
+  for prc in g.transformedProcs:
+    prc.transformedBody = nil
+  g.transformedProcs.setLen 0
+
 proc isDirty*(g: ModuleGraph; m: PSym): bool =
   result = g.suggestMode and sfDirty in m.flags
 
@@ -1118,14 +1123,16 @@ proc markClientsDirty*(g: ModuleGraph; fileIdx: FileIndex) =
   # we need to mark its dependent modules D as dirty right away because after
   # nimsuggest is done with this module, the module's dirty flag will be
   # cleared but D still needs to be remembered as 'dirty'.
-  if g.invalidTransitiveClosure:
-    g.invalidTransitiveClosure = false
-    transitiveClosure(g.deps, g.ifaces.len)
-
-  # every module that *depends* on this file is also dirty:
-  for i in 0i32..<g.ifaces.len.int32:
-    if g.deps.contains(i.dependsOn(fileIdx.int)):
-      g.markDirty(FileIndex(i))
+  # every module that *depends* on this file, directly or not, is also dirty:
+  var reached = initIntSet()
+  var pending = @[fileIdx.int]
+  while pending.len > 0:
+    let dep = pending.pop()
+    for i in 0..<g.ifaces.len:
+      if i notin reached and g.deps.contains(i.dependsOn(dep)):
+        reached.incl i
+        g.markDirty(FileIndex(i))
+        pending.add i
 
 proc needsCompilation*(g: ModuleGraph): bool =
   # every module that *depends* on this file is also dirty:

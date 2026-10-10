@@ -714,7 +714,6 @@ proc compilePipelineModule*(graph: ModuleGraph; fileIdx: FileIndex; flags: TSymF
     initStrTables(graph, result)
     result.ast = nil
     processModuleAux("import(dirty)")
-    graph.markClientsDirty(fileIdx)
 
 proc importPipelineModule(graph: ModuleGraph; s: PSym, fileIdx: FileIndex): PSym =
   # this is called by the semantic checking phase

@@ -1435,7 +1435,7 @@ proc transformBody*(g: ModuleGraph; idgen: IdGenerator; prc: PSym; flags: Transf
     if useCache in flags or prc.typ.callConv == ccInline:
       # genProc for inline procs will be called multiple times from different modules,
       # it is important to transform exactly once to get sym ids and locations right
-      prc.transformedBody = result
+      g.setTransformedBody(prc, result)
     else:
       prc.transformedBody = nil
     # XXX Rodfile support for transformedBody!
