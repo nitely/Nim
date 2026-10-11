@@ -457,6 +457,8 @@ type
     icSemDir*: AbsoluteDir    # imported-module semantics for the effective configuration
     icMainSemDir*: AbsoluteDir # semantics for this entry point's import-cycle group
     icMainModules*: seq[string] # module suffixes whose semantics live in icMainSemDir
+    icOverlayDir*: AbsoluteDir
+    icOverlayModules*: HashSet[string]
     icGroup*: HashSet[string] # under `nim m`: absolute paths of the modules in
                               # this strongly-connected import group. They are all
                               # compiled from source in one process (so mutual
@@ -1024,6 +1026,8 @@ proc semanticFile*(conf: ConfigRef; suffix, ext: string): AbsoluteFile =
   let dir =
     if not conf.icMainSemDir.isEmpty and suffix in conf.icMainModules:
       conf.icMainSemDir
+    elif not conf.icOverlayDir.isEmpty and suffix in conf.icOverlayModules:
+      conf.icOverlayDir
     else:
       getSemanticCacheDir(conf)
   dir / RelativeFile(suffix & ext)

@@ -4085,6 +4085,15 @@ proc toNifFilename*(conf: ConfigRef; f: FileIndex): string =
       return t
   result = semanticFile(conf, suffix, ".s.bif").string
 
+proc readSemDeps*(conf: ConfigRef; f: FileIndex): seq[string] =
+  let path = semanticFile(conf, moduleSuffix(conf, f), ".s.deps.bif").string
+  result = if fileExists(path): collectBifStrLits(path) else: @[]
+
+proc resetCanonState*() =
+  canonTypeIds.clear()
+  canonClaims.clear()
+  canonSigOwners.clear()
+
 proc resolveSym(c: var DecodeContext; symAsStr: string; alsoConsiderPrivate: bool): PSym =
   result = c.syms.getOrDefault(symAsStr)[0]
   if result != nil:

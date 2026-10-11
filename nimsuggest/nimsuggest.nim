@@ -39,6 +39,8 @@ import compiler / [options, commands, modules,
   sigmatch, ast,
   idents, modulegraphs, prefixmatches, lineinfos, cmdlinehelper,
   pathutils, condsyms, syntaxes, suggestsymdb]
+from compiler/ast2nif import resetCanonState
+import std/[intsets, sets]
 
 when defined(nimPreviewSlimSystem):
   import std/typedthreads
@@ -608,6 +610,23 @@ proc recompileFullProject(graph: ModuleGraph) =
     GC_fullCollect()
     graph.compilePipelineProject()
 
+var icRebuildPending = false
+
+proc rebuildFresh(graph: ModuleGraph; projectFileIdx: FileIndex) =
+  benchmark "Recompilation(fresh)":
+    icRebuildPending = false
+    graph.resetForBackend()
+    graph.resetSystemArtifacts()
+    graph.vm = nil
+    graph.resetAllModules()
+    setupProgram(graph.config, graph.cache)
+    resetCanonState()
+    if graph.config.icOverlayDir.isEmpty:
+      graph.config.icOverlayDir = getNimcacheDir(graph.config) / RelativeDir"overlay"
+    graph.config.icOverlayModules.clear()
+    GC_fullCollect()
+    graph.compilePipelineProject(projectFileIdx)
+
 proc mainThread(graph: ModuleGraph) =
   let conf = graph.config
   myLog "searchPaths: "
@@ -831,6 +850,13 @@ proc recompilePartially(graph: ModuleGraph, projectFileIdx = InvalidFileIdx) =
   else:
     myLog fmt "Recompiling partially starting from {graph.getModule(projectFileIdx)}"
 
+  if graph.config.ideImportsFromNif:
+    try:
+      graph.rebuildFresh(projectFileIdx)
+    except Exception as e:
+      myLog fmt "Failed to rebuild with the following error:\n {e.msg} \n\n {e.getStackTrace()}"
+    return
+
   # inst caches are breaking incremental compilation when the cache caches stuff
   # from dirty buffer
   graph.clearInstCache(projectFileIdx)
@@ -1017,6 +1043,9 @@ proc markDirtyIfNeeded(graph: ModuleGraph, file: string, originalFileIdx: FileIn
   let sha = $sha1.secureHashFile(file)
   if graph.config.m.fileInfos[originalFileIdx.int32].hash != sha or graph.config.ideCmd in {ideSug, ideCon}:
     myLog fmt "{file} changed compared to last compilation"
+    if graph.config.ideImportsFromNif:
+      graph.icChangedFiles.incl originalFileIdx.int
+      icRebuildPending = true
     graph.markDirty originalFileIdx
     graph.markClientsDirty originalFileIdx
   else:
@@ -1225,7 +1254,8 @@ proc executeNoHooksV3(cmd: IdeCmd, file: AbsoluteFile, dirtyfile: AbsoluteFile, 
       graph.markDirtyIfNeeded(dirtyFile.string, fileInfoIdx(conf, file))
 
   # these commands require fully compiled project
-  if cmd in {ideUse, ideDus, ideGlobalSymbols, ideChk, ideInlayHints} and graph.needsCompilation():
+  if cmd in {ideUse, ideDus, ideGlobalSymbols, ideChk, ideInlayHints} and
+      (graph.needsCompilation() or icRebuildPending):
     graph.recompilePartially()
     # when doing incremental build for the project root we should make sure that
     # everything is unmarked as no longer beeing dirty in case there is no
@@ -1235,7 +1265,8 @@ proc executeNoHooksV3(cmd: IdeCmd, file: AbsoluteFile, dirtyfile: AbsoluteFile, 
 
   # these commands require partially compiled project
   elif cmd in {ideSug, ideCon, ideOutline, ideHighlight, ideDef, ideChkFile, ideType, ideDeclaration, ideExpand} and
-       (cmd in {ideSug, ideCon} or isIncludeQuery or not dataComplete or graph.needsCompilation(fileIndex)):
+       (cmd in {ideSug, ideCon} or isIncludeQuery or not dataComplete or
+        graph.needsCompilation(fileIndex) or icRebuildPending):
     # for ideSug use v2 implementation
     if cmd in {ideSug, ideCon}:
       conf.m.trackPos = newLineInfo(fileIndex, line, col)

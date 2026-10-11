@@ -203,6 +203,7 @@ proc finishPipelineModule(graph: ModuleGraph; module: PSym; idgen: IdGenerator;
     # (imported modules should be loaded from existing NIF files). Members of the
     # current strongly-connected import group (`--icGroup`) are the exception:
     # they are compiled from source here, so each must write its own NIF.
+    var toOverlay = false
     let shouldWriteNif =
       if graph.config.errorCounter > 0:
         # Never persist an artifact built from erroneous AST. `nim m` does exit
@@ -213,12 +214,18 @@ proc finishPipelineModule(graph: ModuleGraph; module: PSym; idgen: IdGenerator;
         # outputs missing keeps the rule dirty so it re-fires and re-reports.
         false
       elif graph.config.ideActive:
-        # nimsuggest (cmdM): persist NIF for cleanly-compiled, SAVED modules so
-        # later queries load them instead of recompiling. Never persist the
-        # actively edited buffer (it may hold unsaved/incomplete code) nor a
-        # module that failed to compile — that would poison the cache.
+        # nimsuggest (cmdM): persist NIF for cleanly-compiled modules so later
+        # queries load them instead of recompiling. A module built from an
+        # unsaved buffer, or on top of one, goes to the overlay cache instead.
+        # Never persist a module that failed to compile — that would poison
+        # the cache.
+        var tainted = not graph.config.m.fileInfos[module.position].dirtyFile.isEmpty
+        for dep in graph.importDeps.getOrDefault(module.position.FileIndex, @[]):
+          if graph.icTainted.contains(dep.int): tainted = true
+        if tainted: graph.icTainted.incl module.position
+        toOverlay = tainted
         graph.config.cmd == cmdM and graph.config.errorCounter == 0 and
-          graph.config.m.fileInfos[module.position].dirtyFile.isEmpty
+          sfMainModule notin module.flags
       else:
         ({optCompress, optGenBif} * graph.config.globalOptions != {}) or
         (graph.config.cmd == cmdM and
@@ -226,6 +233,15 @@ proc finishPipelineModule(graph: ModuleGraph; module: PSym; idgen: IdGenerator;
           (graph.config.icGroup.len > 0 and
            toFullPath(graph.config, module.position.FileIndex) in graph.config.icGroup)))
     if shouldWriteNif and not graph.config.isDefined("nimscript"):
+      let savedNimcache = graph.config.nimcacheDir
+      let savedSemDir = graph.config.icSemDir
+      if toOverlay:
+        graph.config.icSemDir = getSemanticCacheDir(graph.config)
+        graph.config.nimcacheDir = graph.config.icOverlayDir
+        createDir(graph.config.icOverlayDir)
+      defer:
+        graph.config.nimcacheDir = savedNimcache
+        graph.config.icSemDir = savedSemDir
       topLevelStmts.add finalNode
       # Collect replay actions from both pragma computations and VM state diff
       var replayActions: seq[PNode] = @[]
@@ -305,6 +321,11 @@ proc finishPipelineModule(graph: ModuleGraph; module: PSym; idgen: IdGenerator;
       for f in resolvedImportDeps:
         semDepPaths.add toFullPath(graph.config, f)
       writeSemDeps(graph.config, module.position.int32, semDepPaths)
+      if toOverlay:
+        graph.icWriteOverlayStamp(module.position.FileIndex, resolvedImportDeps)
+      elif graph.config.ideActive:
+        graph.icChangedFiles.excl module.position
+        graph.icWrittenFiles.incl module.position
 
 proc withoutCyclicPragma(n: PNode; cyclic: var bool): PNode =
   ## The module path of an import, without its pragmas. Like

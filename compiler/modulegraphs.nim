@@ -17,6 +17,7 @@ import ast, astalgo, options, lineinfos,idents, btrees, ropes, msgs, pathutils, 
 
 when not defined(nimKochBootstrap):
   import ast2nif
+  from std/times import `<`, toUnix, nanosecond
   import nifstreams
   import "../dist/nimony/src/lib" / bitabs
 
@@ -129,6 +130,11 @@ type
                                             # first module that included it
     importStack*: seq[FileIndex]  # The current import stack. Used for detecting recursive
                                   # module dependencies.
+    icChangedFiles*: IntSet
+    icWrittenFiles*: IntSet
+    icStale: Table[int32, bool]
+    icTainted*: IntSet
+    icOverlayStamps*: Table[string, string]
     cycleGroups*: Table[FileIndex, FileIndex]
       ## the modules that belong to a group of modules connected by
       ## `import m {.cyclic.}`, mapped to the module the group was entered by
@@ -886,6 +892,79 @@ proc uniqueModuleName*(conf: ConfigRef; m: PSym; path: AbsoluteFile): string =
 proc uniqueModuleName*(conf: ConfigRef; m: PSym): string =
   uniqueModuleName(conf, m, AbsoluteFile toFullPath(conf, FileIndex(m.position)))
 
+when not defined(nimKochBootstrap):
+  proc icMainNif(g: ModuleGraph; fileIdx: FileIndex): string =
+    getSemanticCacheDir(g.config).string / (cachedModuleSuffix(g.config, fileIdx) & ".s.bif")
+
+  proc icSourceHash*(g: ModuleGraph; fileIdx: FileIndex): string =
+    let dirty = g.config.m.fileInfos[fileIdx.int32].dirtyFile
+    let path = if dirty.isEmpty: toFullPath(g.config, fileIdx) else: dirty.string
+    result = if fileExists(path): getMD5(readFile(path)) else: ""
+
+  proc icCurrentVersion*(g: ModuleGraph; fileIdx: FileIndex): string =
+    let suffix = cachedModuleSuffix(g.config, fileIdx)
+    if suffix in g.config.icOverlayModules:
+      result = "o:" & g.icOverlayStamps.getOrDefault(suffix)
+    else:
+      let nif = icMainNif(g, fileIdx)
+      if fileExists(nif):
+        let t = getLastModificationTime(nif)
+        result = "m:" & $t.toUnix & "." & $t.nanosecond
+      else:
+        result = ""
+
+  proc icMustCompile(g: ModuleGraph; fileIdx: FileIndex): bool
+
+  proc icOverlayValid(g: ModuleGraph; fileIdx: FileIndex): bool =
+    if g.config.icOverlayDir.isEmpty: return false
+    let suffix = cachedModuleSuffix(g.config, fileIdx)
+    let keyFile = g.config.icOverlayDir.string / (suffix & ".okey")
+    if not fileExists(keyFile): return false
+    let stamp = readFile(keyFile)
+    let lines = stamp.splitLines
+    if lines.len == 0 or lines[0] != icSourceHash(g, fileIdx): return false
+    for i in 1..<lines.len:
+      if lines[i].len == 0: continue
+      let tab = lines[i].find('\t')
+      if tab < 0: return false
+      let dep = fileInfoIdx(g.config, AbsoluteFile lines[i][0..<tab])
+      if icMustCompile(g, dep) or icCurrentVersion(g, dep) != lines[i][tab+1..^1]:
+        return false
+    g.config.icOverlayModules.incl suffix
+    g.icOverlayStamps[suffix] = getMD5(stamp)
+    g.icTainted.incl fileIdx.int
+    result = true
+
+  proc icWriteOverlayStamp*(g: ModuleGraph; fileIdx: FileIndex; deps: seq[FileIndex]) =
+    var stamp = icSourceHash(g, fileIdx)
+    for d in deps:
+      stamp.add "\n" & toFullPath(g.config, d) & "\t" & icCurrentVersion(g, d)
+    let suffix = cachedModuleSuffix(g.config, fileIdx)
+    writeFile(g.config.icOverlayDir.string / (suffix & ".okey"), stamp)
+    g.config.icOverlayModules.incl suffix
+    g.icOverlayStamps[suffix] = getMD5(stamp)
+
+  proc icMustCompile(g: ModuleGraph; fileIdx: FileIndex): bool =
+    if not g.config.ideActive: return false
+    let k = fileIdx.int32
+    g.icStale.withValue(k, known):
+      return known[]
+    g.icStale[k] = false
+    var stale = g.icChangedFiles.contains(fileIdx.int)
+    if not stale and not g.icWrittenFiles.contains(fileIdx.int):
+      let nif = icMainNif(g, fileIdx)
+      let src = toFullPath(g.config, fileIdx)
+      stale = fileExists(nif) and fileExists(src) and
+        getLastModificationTime(src) > getLastModificationTime(nif)
+    if not stale:
+      for dep in readSemDeps(g.config, fileIdx):
+        let d = fileInfoIdx(g.config, AbsoluteFile dep)
+        if icMustCompile(g, d) or cachedModuleSuffix(g.config, d) in g.config.icOverlayModules:
+          stale = true
+          break
+    result = stale and not icOverlayValid(g, fileIdx)
+    g.icStale[k] = result
+
 proc loadsFromNif*(g: ModuleGraph; fileIdx: FileIndex): bool =
   ## `nim m` loads an import from its precompiled NIF file. The members of the
   ## current strongly-connected import group (`--icGroup`) are mutually
@@ -898,7 +977,8 @@ proc loadsFromNif*(g: ModuleGraph; fileIdx: FileIndex): bool =
       not g.withinSystem and
       not g.config.isDefined("nimscript") and
       (g.config.icGroup.len == 0 or
-       toFullPath(g.config, fileIdx) notin g.config.icGroup)
+       toFullPath(g.config, fileIdx) notin g.config.icGroup) and
+      not icMustCompile(g, fileIdx)
 
 proc inSameCycleGroup*(g: ModuleGraph; a, b: FileIndex): bool =
   let ga = g.cycleGroups.getOrDefault(a, InvalidFileIdx)
@@ -947,6 +1027,9 @@ proc initModuleGraphFields(result: ModuleGraph) =
   result.importDeps = initTable[FileIndex, seq[FileIndex]]()
   result.ifaces = @[]
   result.importStack = @[]
+  result.icStale = initTable[int32, bool]()
+  result.icTainted = initIntSet()
+  result.icOverlayStamps = initTable[string, string]()
   result.cycleGroups = initTable[FileIndex, FileIndex]()
   result.inclToMod = initTable[FileIndex, FileIndex]()
   result.owners = @[]
