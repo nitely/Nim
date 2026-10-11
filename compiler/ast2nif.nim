@@ -2558,9 +2558,16 @@ type
 
 proc releaseDecodeContext*(c: var DecodeContext) =
   for m in c.mods.values:
+    releaseForeignTokens(m.buf)
     icbif.release(m.buf.pool)
-    if m.semTried: icbif.release(m.semBuf.pool)
+    if m.semTried:
+      releaseForeignTokens(m.semBuf)
+      icbif.release(m.semBuf.pool)
   c.mods.clear()
+  c.pendingBodies.clear()
+  c.consumedBodies.clear()
+  c.types.clear()
+  c.syms.clear()
 
 proc createDecodeContext*(config: ConfigRef; cache: IdentCache): DecodeContext =
   ## Supposed to be a global variable

@@ -445,6 +445,10 @@ type
 const
   NoVmProcInfo* = VmProcInfo(pc: 0'i32, frameSlots: -1'i32)
 
+
+proc freeVm*(vm: RootRef) =
+  if vm != nil: freeHostMemory(PCtx(vm).mem)
+
 proc newCtx*(module: PSym; cache: IdentCache; g: ModuleGraph; idgen: IdGenerator): PCtx =
   PCtx(code: @[], lastEof: -1, debug: @[],
     prc: PProc(blocks: @[]), module: module, loopIterations: g.config.maxLoopIterationsVM,

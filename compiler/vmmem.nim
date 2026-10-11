@@ -195,6 +195,11 @@ proc hostAlloc(size: int): Address =
 
 proc hostDealloc(a: Address) = dealloc(toPtr(a))
 
+proc freeHostMemory*(m: var VmMemory) =
+  for r in m.regions:
+    if r.kind != rgForeign: hostDealloc(r.start)
+  m.regions.setLen 0
+
 # ------------------------- heap ----------------------------------------------
 
 proc sizeClass(size: int): (int, int) =
