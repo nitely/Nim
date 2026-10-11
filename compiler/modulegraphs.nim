@@ -24,7 +24,7 @@ when not defined(nimKochBootstrap):
 import typekeys
 
 when defined(nimPreviewSlimSystem):
-  import std/assertions
+  import std/[assertions, syncio]
 
 type
   SigHash* = distinct MD5Digest
@@ -1059,17 +1059,23 @@ proc newModuleGraph*(cache: IdentCache; config: ConfigRef): ModuleGraph =
   ast.setupProgram(config, cache)
 
 proc resetAllModules*(g: ModuleGraph) =
-  g.packageSyms = initStrTable()
-  g.deps = initIntSet()
-  g.ifaces = @[]
-  g.importStack = @[]
-  g.inclToMod = initTable[FileIndex, FileIndex]()
-  g.usageSym = nil
-  g.owners = @[]
-  g.methods = @[]
-  g.compilerprocs = initStrTable()
-  g.exposed = initStrTable()
-  initModuleGraphFields(g)
+  var fresh = ModuleGraph(
+    config: g.config,
+    cache: g.cache,
+    suggestMode: g.suggestMode,
+    pipelinePass: g.pipelinePass,
+    doStopCompile: g.doStopCompile,
+    repl: g.repl,
+    strongSemCheck: g.strongSemCheck,
+    compatibleProps: g.compatibleProps,
+    onDefinition: g.onDefinition,
+    onDefinitionResolveForward: g.onDefinitionResolveForward,
+    onUsage: g.onUsage,
+    icChangedFiles: g.icChangedFiles,
+    icWrittenFiles: g.icWrittenFiles
+  )
+  initModuleGraphFields(fresh)
+  g[] = move fresh[]
 
 proc getModule*(g: ModuleGraph; fileIdx: FileIndex): PSym =
   if fileIdx.int32 >= 0 and fileIdx.int32 < g.ifaces.len:

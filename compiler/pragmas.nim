@@ -1093,7 +1093,7 @@ proc singlePragma(c: PContext, sym: PSym, n: PNode, i: var int,
       of wAcyclic:
         noVal(c, it)
         if sym.typ == nil: invalidPragma(c, it)
-        else: incl(sym.typ, tfAcyclic)
+        elif not isDefined(c.config, "nimIgnoreAcyclic"): incl(sym.typ, tfAcyclic)
       of wShallow:
         noVal(c, it)
         if sym.typ == nil: invalidPragma(c, it)

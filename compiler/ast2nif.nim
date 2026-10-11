@@ -2556,6 +2556,12 @@ type
       ## worker deserializes system.bif + a bunch of others" cost — breadth (how
       ## many syms) attributed to duplication axis (which shared module).
 
+proc releaseDecodeContext*(c: var DecodeContext) =
+  for m in c.mods.values:
+    icbif.release(m.buf.pool)
+    if m.semTried: icbif.release(m.semBuf.pool)
+  c.mods.clear()
+
 proc createDecodeContext*(config: ConfigRef; cache: IdentCache): DecodeContext =
   ## Supposed to be a global variable
   result = DecodeContext(infos: newLineInfoWriter(config), cache: cache)

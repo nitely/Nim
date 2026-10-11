@@ -56,6 +56,7 @@ type
       ## pays for one.
   LazyPool = ref object
     strings, syms, filenames: LazyNames
+    blob: VfsBlob
 
 proc hash(p: Pool): Hash = hash(cast[pointer](p))
 
@@ -64,6 +65,11 @@ var lazyPools: Table[Pool, LazyPool]
   ## address cannot be reused for another one.
 
 proc lazyOf(p: Pool): LazyPool {.inline.} = lazyPools.getOrDefault(p)
+
+proc release*(p: Pool) =
+  var lazy: LazyPool
+  if lazyPools.pop(p, lazy):
+    closeBlob(lazy.blob)
 
 # ── names in the mapping ──────────────────────────────────────────────────
 
@@ -278,6 +284,7 @@ proc load*(filename: string): BifModule =
     lazy.strings = rNames(r, result.buf.pool.strings, nStrings, "")
     lazy.syms = rNames(r, result.buf.pool.symbols, nSyms, NifSymbol())
     lazy.filenames = rNames(r, result.buf.pool.filenames, nFiles, "")
+    lazy.blob = blob
     lazyPools[result.buf.pool] = lazy
     let nIndex = int rVarint(r)
     result.index = newSeq[IndexEntry](nIndex)

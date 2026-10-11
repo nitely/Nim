@@ -603,9 +603,6 @@ proc execCmd(cmd: string; graph: ModuleGraph; cachedMsgs: CachedMsgs) =
 
 proc recompileFullProject(graph: ModuleGraph) =
   benchmark "Recompilation(clean)":
-    graph.resetForBackend()
-    graph.resetSystemArtifacts()
-    graph.vm = nil
     graph.resetAllModules()
     GC_fullCollect()
     graph.compilePipelineProject()
@@ -615,10 +612,8 @@ var icRebuildPending = false
 proc rebuildFresh(graph: ModuleGraph; projectFileIdx: FileIndex) =
   benchmark "Recompilation(fresh)":
     icRebuildPending = false
-    graph.resetForBackend()
-    graph.resetSystemArtifacts()
-    graph.vm = nil
     graph.resetAllModules()
+    releaseProgram()
     setupProgram(graph.config, graph.cache)
     resetCanonState()
     if graph.config.icOverlayDir.isEmpty:

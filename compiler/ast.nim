@@ -54,6 +54,10 @@ proc setupProgram*(config: ConfigRef; cache: IdentCache) =
   when not defined(nimKochBootstrap):
     program = createDecodeContext(config, cache)
 
+proc releaseProgram*() =
+  when not defined(nimKochBootstrap):
+    ast2nif.releaseDecodeContext(program)
+
 proc setIcMainModule*(fileIdx: FileIndex) =
   ## Tells the IC loader which module is being compiled fresh, so that
   ## re-exports of that module's symbols by dependencies are not loaded as
