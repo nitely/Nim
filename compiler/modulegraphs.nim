@@ -904,13 +904,16 @@ when not defined(nimKochBootstrap):
       for dep in collectBifStrLits(depsFile):
         g.icVerify(fileInfoIdx(g.config, AbsoluteFile dep))
 
-  proc icVerifyClosure*(g: ModuleGraph) =
+  proc icVerifyClosure*(g: ModuleGraph): bool =
     ## Records the modules `nim ic`'s frontend just brought up to date: the
-    ## import closures of the main module and of system.
+    ## import closures of the main module and of system. False if the frontend
+    ## built nothing, not even system.
     let main = cachedModuleSuffix(g.config, g.config.projectMainIdx)
     g.icCollectVerified(string(g.config.icSemDir / RelativeDir"main" /
       RelativeDir(main) / RelativeFile(main & ".s.deps.bif")))
-    g.icVerify(fileInfoIdx(g.config, g.config.libpath / RelativeFile"system.nim"))
+    let system = fileInfoIdx(g.config, g.config.libpath / RelativeFile"system.nim")
+    g.icVerify(system)
+    result = fileExists(semanticFile(g.config, cachedModuleSuffix(g.config, system), ".edges.bif"))
 
   proc icNifIsStale*(g: ModuleGraph; fileIdx: FileIndex): bool =
     ## nimsuggest only reads NIFs that `nim ic`'s frontend checked when it

@@ -654,25 +654,34 @@ proc mainThread(graph: ModuleGraph) =
 var
   inputThread: Thread[ThreadParams]
 
-proc runIcFrontend(conf: ConfigRef): bool =
+proc runIcFrontend(graph: ModuleGraph) =
   ## Brings the project's NIFs up to date with `nim ic`'s frontend (`nim track`
-  ## without a query) and points the NIF loader at them.
+  ## without a query) and points the NIF loader at them. Modules that fail to
+  ## compile there (the frontend exits with 1) are compiled from source; not
+  ## being able to run the frontend is an error.
+  let conf = graph.config
   let nim = getAppDir() / addFileExt("nim", ExeExt)
   let cache = getNimcacheDir(conf).string
   let cmd = quoteShellCommand([nim, "track", "--nimcache:" & cache, conf.projectFull.string])
+  let signature = cache / "ic_build_args.txt"
+  template fail(msg: string) =
+    stderr.writeLine "nimsuggest: --ideImports:nif: " & msg
+    quit 1
+  removeFile(signature)
   var output = ""
   var exitCode = -1
   benchmark "IC frontend":
     try:
       (output, exitCode) = execCmdEx(cmd, workingDir = conf.projectPath.string)
     except OSError as e:
-      output = e.msg
+      fail "cannot run " & cmd & ": " & e.msg
   myLog "IC frontend: " & cmd & " exit code: " & $exitCode
   if exitCode != 0: myLog output
-  let signature = cache / "ic_build_args.txt"
-  if not fileExists(signature): return false
+  if not fileExists(signature):
+    fail cmd & " did not set up the NIF cache:\n" & output
   conf.icSemDir = AbsoluteDir(cache / "configs" / $secureHash(readFile(signature)) / "sem")
-  result = dirExists(conf.icSemDir.string)
+  if not graph.icVerifyClosure() and exitCode == 0:
+    fail cmd & " built no NIF for system:\n" & output
 
 proc mainCommand(graph: ModuleGraph) =
   let conf = graph.config
@@ -693,11 +702,7 @@ proc mainCommand(graph: ModuleGraph) =
   add(conf.searchPaths, conf.libpath)
 
   if conf.ideImportsFromNif:
-    if runIcFrontend(conf):
-      graph.icVerifyClosure()
-    else:
-      myLog "IC frontend failed, compiling the imports from source"
-      conf.setCmd(cmdCheck)
+    runIcFrontend(graph)
 
   conf.setErrorMaxHighMaybe # honor --errorMax even if it may not make sense here
   # do not print errors, but log them
