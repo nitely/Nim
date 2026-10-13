@@ -11,13 +11,14 @@
 ## represents a complete Nim project. Single modules can either be kept in RAM
 ## or stored in a rod-file.
 
-import std/[algorithm, intsets, tables, hashes, strtabs, os, strutils, parseutils, sets]
+import std/[algorithm, intsets, tables, hashes, strtabs, os, strutils, parseutils, sets, times]
 import ../dist/checksums/src/checksums/md5
 import ast, astalgo, options, lineinfos,idents, btrees, ropes, msgs, pathutils, packages, suggestsymdb
 
 when not defined(nimKochBootstrap):
   import ast2nif
   import nifstreams
+  import icnifcore
   import "../dist/nimony/src/lib" / bitabs
 
 import typekeys
@@ -75,6 +76,10 @@ type
                                   # instance, for collision probing in
                                   # `setInstanceDisamb`
     icCnifFiles*: seq[string]     # `.c.nif` artifacts written by this run
+    icFromSource: IntSet          # nimsuggest: modules compiled from source
+    icStale: Table[int32, bool]   # nimsuggest: memoized `icNifIsStale`
+    icVerified: HashSet[string]   # nimsuggest: modules `nim ic`'s frontend
+                                  # checked when nimsuggest started
     pendingMethodReplays*: seq[PSym] # method registrations loaded under
                                   # `nim nifc`, bucketed only after every
                                   # module is loaded (`flushMethodReplays`)
@@ -886,6 +891,59 @@ proc uniqueModuleName*(conf: ConfigRef; m: PSym; path: AbsoluteFile): string =
 proc uniqueModuleName*(conf: ConfigRef; m: PSym): string =
   uniqueModuleName(conf, m, AbsoluteFile toFullPath(conf, FileIndex(m.position)))
 
+when not defined(nimKochBootstrap):
+  proc icCollectVerified(g: ModuleGraph; depsFile: string)
+
+  proc icVerify(g: ModuleGraph; module: FileIndex) =
+    if not g.icVerified.containsOrIncl(toFullPath(g.config, module)):
+      g.icCollectVerified(semanticFile(g.config,
+        cachedModuleSuffix(g.config, module), ".s.deps.bif").string)
+
+  proc icCollectVerified(g: ModuleGraph; depsFile: string) =
+    if fileExists(depsFile):
+      for dep in collectBifStrLits(depsFile):
+        g.icVerify(fileInfoIdx(g.config, AbsoluteFile dep))
+
+  proc icVerifyClosure*(g: ModuleGraph) =
+    ## Records the modules `nim ic`'s frontend just brought up to date: the
+    ## import closures of the main module and of system.
+    let main = cachedModuleSuffix(g.config, g.config.projectMainIdx)
+    g.icCollectVerified(string(g.config.icSemDir / RelativeDir"main" /
+      RelativeDir(main) / RelativeFile(main & ".s.deps.bif")))
+    g.icVerify(fileInfoIdx(g.config, g.config.libpath / RelativeFile"system.nim"))
+
+  proc icNifIsStale*(g: ModuleGraph; fileIdx: FileIndex): bool =
+    ## nimsuggest only reads NIFs that `nim ic`'s frontend checked when it
+    ## started. A NIF is stale when its module failed to compile there (its
+    ## source or an include is newer), or when an import is stale or was
+    ## compiled from source.
+    if g.icFromSource.contains(fileIdx.int): return true
+    let k = fileIdx.int32
+    g.icStale.withValue(k, known):
+      return known[]
+    g.icStale[k] = false
+    let src = toFullPath(g.config, fileIdx)
+    let suffix = cachedModuleSuffix(g.config, fileIdx)
+    let stamp = semanticFile(g.config, suffix, ".edges.bif").string
+    result = src notin g.icVerified or not fileExists(stamp)
+    if not result:
+      let written = getLastModificationTime(stamp)
+      for f in src & nifIncludes(g.config, fileIdx):
+        if fileExists(f) and written < getLastModificationTime(f):
+          result = true
+          break
+    if not result:
+      for dep in collectBifStrLits(semanticFile(g.config, suffix, ".s.deps.bif").string):
+        if icNifIsStale(g, fileInfoIdx(g.config, AbsoluteFile dep)):
+          result = true
+          break
+    g.icStale[k] = result
+
+proc icNoteFromSource*(g: ModuleGraph; fileIdx: FileIndex) =
+  if g.config.ideActive and not g.config.isDefined("nimscript"):
+    g.icFromSource.incl fileIdx.int
+    g.icStale.clear()
+
 proc loadsFromNif*(g: ModuleGraph; fileIdx: FileIndex): bool =
   ## `nim m` loads an import from its precompiled NIF file. The members of the
   ## current strongly-connected import group (`--icGroup`) are mutually
@@ -898,7 +956,8 @@ proc loadsFromNif*(g: ModuleGraph; fileIdx: FileIndex): bool =
       not g.withinSystem and
       not g.config.isDefined("nimscript") and
       (g.config.icGroup.len == 0 or
-       toFullPath(g.config, fileIdx) notin g.config.icGroup)
+       toFullPath(g.config, fileIdx) notin g.config.icGroup) and
+      not (g.config.ideActive and icNifIsStale(g, fileIdx))
 
 proc inSameCycleGroup*(g: ModuleGraph; a, b: FileIndex): bool =
   let ga = g.cycleGroups.getOrDefault(a, InvalidFileIdx)
@@ -1286,6 +1345,13 @@ when not defined(nimKochBootstrap):
     # relationship is invisible for NIF-served modules.
     for incPath in result.includes:
       g.addIncludeDep(fileIdx, fileInfoIdx(g.config, AbsoluteFile incPath))
+    # nimsuggest marks a module's importers dirty through `deps`, which only a
+    # source compile records.
+    if g.suggestMode:
+      let depsFile = semanticFile(g.config, cachedModuleSuffix(g.config, fileIdx), ".s.deps.bif").string
+      if fileExists(depsFile):
+        for dep in collectBifStrLits(depsFile):
+          g.addDep(m, fileInfoIdx(g.config, AbsoluteFile dep))
 
     # Rebuild `procInstCache` from this module's generic-instance OFFERS so a
     # consumer's `genericCacheGet` finds the instance and SKIPS re-running

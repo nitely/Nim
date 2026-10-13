@@ -30,7 +30,7 @@ else:
 when not defined(nimcore):
   {.error: "nimcore MUST be defined for Nim's core tooling".}
 
-import strutils, os, parseopt, parseutils, sequtils, net, rdstdin, sexp
+import strutils, os, osproc, parseopt, parseutils, sequtils, net, rdstdin, sexp
 # Do NOT import suggest. It will lead to weird bugs with
 # suggestionResultHook, because suggest.nim is included by sigmatch.
 # So we import that one instead.
@@ -654,6 +654,26 @@ proc mainThread(graph: ModuleGraph) =
 var
   inputThread: Thread[ThreadParams]
 
+proc runIcFrontend(conf: ConfigRef): bool =
+  ## Brings the project's NIFs up to date with `nim ic`'s frontend (`nim track`
+  ## without a query) and points the NIF loader at them.
+  let nim = getAppDir() / addFileExt("nim", ExeExt)
+  let cache = getNimcacheDir(conf).string
+  let cmd = quoteShellCommand([nim, "track", "--nimcache:" & cache, conf.projectFull.string])
+  var output = ""
+  var exitCode = -1
+  benchmark "IC frontend":
+    try:
+      (output, exitCode) = execCmdEx(cmd, workingDir = conf.projectPath.string)
+    except OSError as e:
+      output = e.msg
+  myLog "IC frontend: " & cmd & " exit code: " & $exitCode
+  if exitCode != 0: myLog output
+  let signature = cache / "ic_build_args.txt"
+  if not fileExists(signature): return false
+  conf.icSemDir = AbsoluteDir(cache / "configs" / $secureHash(readFile(signature)) / "sem")
+  result = dirExists(conf.icSemDir.string)
+
 proc mainCommand(graph: ModuleGraph) =
   let conf = graph.config
   # Use the pipeline driver (same as `nim check`): it is where IC/NIF loading
@@ -671,6 +691,13 @@ proc mainCommand(graph: ModuleGraph) =
     quit "cannot find file: " & conf.projectFull.string
 
   add(conf.searchPaths, conf.libpath)
+
+  if conf.ideImportsFromNif:
+    if runIcFrontend(conf):
+      graph.icVerifyClosure()
+    else:
+      myLog "IC frontend failed, compiling the imports from source"
+      conf.setCmd(cmdCheck)
 
   conf.setErrorMaxHighMaybe # honor --errorMax even if it may not make sense here
   # do not print errors, but log them

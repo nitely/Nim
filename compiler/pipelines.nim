@@ -213,12 +213,9 @@ proc finishPipelineModule(graph: ModuleGraph; module: PSym; idgen: IdGenerator;
         # outputs missing keeps the rule dirty so it re-fires and re-reports.
         false
       elif graph.config.ideActive:
-        # nimsuggest (cmdM): persist NIF for cleanly-compiled, SAVED modules so
-        # later queries load them instead of recompiling. Never persist the
-        # actively edited buffer (it may hold unsaved/incomplete code) nor a
-        # module that failed to compile — that would poison the cache.
-        graph.config.cmd == cmdM and graph.config.errorCounter == 0 and
-          graph.config.m.fileInfos[module.position].dirtyFile.isEmpty
+        # nimsuggest only reads the NIFs `nim ic`'s frontend writes: one module
+        # per process, so no NIF can refer to types another module minted here.
+        false
       else:
         ({optCompress, optGenBif} * graph.config.globalOptions != {}) or
         (graph.config.cmd == cmdM and
@@ -613,6 +610,7 @@ proc compilePipelineModule*(graph: ModuleGraph; fileIdx: FileIndex; flags: TSymF
           " optCompress=" & $(optCompress in graph.config.globalOptions) &
           " cmd=" & $graph.config.cmd
         dbgf.close()
+    graph.icNoteFromSource(fileIdx)
     onProcessing(graph, fileIdx, moduleStatus, fromModule = fromModule)
     var s: PLLStream = nil
     if sfMainModule in flags:
@@ -633,10 +631,8 @@ proc compilePipelineModule*(graph: ModuleGraph; fileIdx: FileIndex; flags: TSymF
         let precomp = moduleFromNifFile(graph, fileIdx)
         if precomp.module == nil:
           if graph.config.ideActive:
-            # nimsuggest bootstrap: this import has no precompiled NIF yet (cold
-            # cache, or it was invalidated). Don't error — fall through to the
-            # source-compile path below; the pass-close emits a fresh NIF so the
-            # next query loads it instead of recompiling.
+            # nimsuggest: no NIF from `nim ic`'s frontend (the module failed
+            # to compile there). Compile it from source.
             discard
           else:
             let nifPath = toNifFilename(graph.config, fileIdx)
@@ -772,13 +768,13 @@ proc compilePipelineProject*(graph: ModuleGraph; projectFileIdx = InvalidFileIdx
     when not defined(nimKochBootstrap):
       # Don't clobber an already-compiled system: nimsuggest's NimScript config
       # evaluation compiles `system` into this same graph before we get here.
-      if graph.systemModule == nil:
+      if graph.systemModule == nil and not (graph.config.ideActive and
+          graph.icNifIsStale(graph.config.m.systemFileIdx)):
         let precomp = moduleFromNifFile(graph, graph.config.m.systemFileIdx)
         graph.systemModule = precomp.module
       if graph.systemModule == nil:
         if graph.config.ideActive:
-          # nimsuggest bootstrap: no system NIF yet — compile it from source
-          # (the pass-close emits it), then continue with the main module.
+          # nimsuggest: no usable system NIF, compile it from source.
           graph.compilePipelineSystemModule()
         else:
           let nifPath = toNifFilename(graph.config, graph.config.m.systemFileIdx)
