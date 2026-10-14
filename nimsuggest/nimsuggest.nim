@@ -679,7 +679,14 @@ proc runIcFrontend(graph: ModuleGraph) =
   if exitCode != 0: myLog output
   if not fileExists(signature):
     fail cmd & " did not set up the NIF cache:\n" & output
+  let format = cache / "ic.version"
+  if not fileExists(format) or readFile(format) != icFormatVersion:
+    fail nim & " writes NIFs in another format than nimsuggest reads (" &
+      icFormatVersion & "): is it from the same build?"
   conf.icSemDir = AbsoluteDir(cache / "configs" / $secureHash(readFile(signature)) / "sem")
+  if not dirExists(conf.icSemDir.string):
+    fail cmd & " wrote no " & conf.icSemDir.string & ": is " & nim &
+      " from the same build as nimsuggest?\n" & output
   if not graph.icVerifyClosure() and exitCode == 0:
     fail cmd & " built no NIF for system:\n" & output
 
