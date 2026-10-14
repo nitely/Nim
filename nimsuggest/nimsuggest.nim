@@ -655,19 +655,16 @@ var
   inputThread: Thread[ThreadParams]
 
 proc runIcFrontend(graph: ModuleGraph) =
-  ## Brings the project's NIFs up to date with `nim ic`'s frontend (`nim track`
-  ## without a query) and points the NIF loader at them. Modules that fail to
-  ## compile there (the frontend exits with 1) are compiled from source; not
-  ## being able to run the frontend is an error.
+  ## Brings the project's NIFs up to date with `nim ns` and points the NIF
+  ## loader at them. Modules that fail to compile there are
+  ## compiled from source; not being able to run `nim ns` is an error.
   let conf = graph.config
   let nim = getAppDir() / addFileExt("nim", ExeExt)
   let cache = getNimcacheDir(conf).string
-  let cmd = quoteShellCommand([nim, "track", "--nimcache:" & cache, conf.projectFull.string])
-  let signature = cache / "ic_build_args.txt"
+  let cmd = quoteShellCommand([nim, "ns", "--nimcache:" & cache, conf.projectFull.string])
   template fail(msg: string) =
     stderr.writeLine "nimsuggest: --ideImports:nif: " & msg
     quit 1
-  removeFile(signature)
   var output = ""
   var exitCode = -1
   benchmark "IC frontend":
@@ -677,18 +674,22 @@ proc runIcFrontend(graph: ModuleGraph) =
       fail "cannot run " & cmd & ": " & e.msg
   myLog "IC frontend: " & cmd & " exit code: " & $exitCode
   if exitCode != 0: myLog output
-  if not fileExists(signature):
-    fail cmd & " did not set up the NIF cache:\n" & output
   let format = cache / "ic.version"
   if not fileExists(format) or readFile(format) != icFormatVersion:
     fail nim & " writes NIFs in another format than nimsuggest reads (" &
-      icFormatVersion & "): is it from the same build?"
-  conf.icSemDir = AbsoluteDir(cache / "configs" / $secureHash(readFile(signature)) / "sem")
-  if not dirExists(conf.icSemDir.string):
-    fail cmd & " wrote no " & conf.icSemDir.string & ": is " & nim &
+      icFormatVersion & "): is it from the same build?\n" & output
+  for line in output.splitLines:
+    if line.startsWith("icsemdir:"):
+      conf.icSemDir = AbsoluteDir(line.substr("icsemdir:".len))
+    elif line.startsWith("icmainsemdir:"):
+      conf.icMainSemDir = AbsoluteDir(line.substr("icmainsemdir:".len))
+    elif line.startsWith("icmainmodule:"):
+      conf.icMainModules.add line.substr("icmainmodule:".len)
+    elif line.startsWith("icmodule:"):
+      graph.icVerify(line.substr("icmodule:".len))
+  if conf.icSemDir.isEmpty:
+    fail cmd & " did not build the NIFs: is " & nim &
       " from the same build as nimsuggest?\n" & output
-  if not graph.icVerifyClosure() and exitCode == 0:
-    fail cmd & " built no NIF for system:\n" & output
 
 proc mainCommand(graph: ModuleGraph) =
   let conf = graph.config

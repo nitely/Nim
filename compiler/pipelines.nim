@@ -627,7 +627,8 @@ proc compilePipelineModule*(graph: ModuleGraph; fileIdx: FileIndex; flags: TSymF
       # source). The members of the `--icGroup` fall through below: that
       # resolves the cycle in-memory, the same way the non-incremental compiler
       # handles recursive module imports.
-      if sfMainModule notin flags and loadsFromNif(graph, fileIdx):
+      if (sfMainModule notin flags and loadsFromNif(graph, fileIdx)) or
+          (sfMainModule in flags and graph.mainLoadsFromNif(fileIdx)):
         let precomp = moduleFromNifFile(graph, fileIdx)
         if precomp.module == nil:
           if graph.config.ideActive:
@@ -762,7 +763,8 @@ proc compilePipelineProject*(graph: ModuleGraph; projectFileIdx = InvalidFileIdx
     connectPipelineCallbacks(graph)
     # Record the main module so the IC loader won't materialise duplicate stubs
     # for its own symbols when a dependency (e.g. system) re-exports them.
-    setIcMainModule(projectFile)
+    if not graph.mainLoadsFromNif(projectFile):
+      setIcMainModule(projectFile)
     graph.config.m.systemFileIdx = fileInfoIdx(graph.config,
         graph.config.libpath / RelativeFile"system.nim")
     when not defined(nimKochBootstrap):

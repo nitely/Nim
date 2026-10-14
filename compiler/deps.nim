@@ -1056,12 +1056,6 @@ proc selectMainSemanticModules(c: DepContext) =
       for i in comp: c.config.icMainModules.add c.nodes[i].files[0].modname
   c.config.icMainModules.sort()
 
-proc mainGroup(c: DepContext): seq[int] =
-  ## The modules compiled together with the main module: it and its import cycle.
-  result = @[]
-  for comp in computeSCCs(c):
-    if 0 in comp: return comp
-
 proc semanticArgs(conf: ConfigRef): seq[string] =
   result = @["--icSemDir:" & conf.icSemDir.string,
              "--icMainSemDir:" & conf.icMainSemDir.string]
@@ -1306,8 +1300,6 @@ proc generateFrontendBuildFile(c: DepContext; forwardedArgs: seq[string]): strin
   for sccId, comp in sccs:
     for nodeIdx in comp: sccOf[nodeIdx] = sccId
   for comp in sccs:
-    # `nim ns` leaves the main module to nimsuggest, which compiles it itself.
-    if c.config.cmd == cmdNs and 0 in comp: continue
     # Representative (project file for this invocation) = smallest node id, so a
     # component containing the root (node 0) is driven by the root.
     var members = comp
@@ -1950,21 +1942,22 @@ proc deriveFromSemDeps(c: var DepContext; afterRound: bool): bool =
 proc allSemmed(c: DepContext): bool =
   ## Whether every scheduled module has its semmed NIF.
   result = true
-  let skipped = if c.config.cmd == cmdNs: c.mainGroup else: @[]
   for node in c.nodes:
-    if not node.deferred and node.id notin skipped and
-        not fileExists(c.semmedFile(node.files[0])):
+    if not node.deferred and not fileExists(c.semmedFile(node.files[0])):
       return false
 
 proc reportToNimsuggest(c: DepContext) =
   ## `nim ns`: prints, on lines of their own, where the semantic NIFs are and the
   ## modules this run checked, so nimsuggest loads only NIFs nifmake checked.
-  let skipped = c.mainGroup
-  msgWriteln(c.config, "", {msgStdout, msgSkipHook})
-  msgWriteln(c.config, "icsemdir:" & c.config.icSemDir.string, {msgStdout, msgSkipHook})
+  template report(s: string) = msgWriteln(c.config, s, {msgStdout, msgSkipHook})
+  report ""
+  report "icsemdir:" & c.config.icSemDir.string
+  report "icmainsemdir:" & c.config.icMainSemDir.string
+  for suffix in c.config.icMainModules:
+    report "icmainmodule:" & suffix
   for node in c.nodes:
-    if not node.deferred and node.id notin skipped:
-      msgWriteln(c.config, "icmodule:" & node.files[0].nimFile, {msgStdout, msgSkipHook})
+    if not node.deferred:
+      report "icmodule:" & node.files[0].nimFile
 
 proc commandIc*(conf: ConfigRef; frontendOnly = false) =
   ## Main entry point for `nim ic`. With `frontendOnly` (used by `nim track` for

@@ -943,6 +943,11 @@ proc loadsFromNif*(g: ModuleGraph; fileIdx: FileIndex): bool =
        toFullPath(g.config, fileIdx) notin g.config.icGroup) and
       not (g.config.ideActive and icNifIsStale(g, fileIdx))
 
+proc mainLoadsFromNif*(g: ModuleGraph; fileIdx: FileIndex): bool =
+  ## nimsuggest loads the main module from the NIF `nim ns` built in its main role.
+  g.config.ideActive and fileIdx == g.config.projectMainIdx and
+    not g.config.icMainSemDir.isEmpty and loadsFromNif(g, fileIdx)
+
 proc inSameCycleGroup*(g: ModuleGraph; a, b: FileIndex): bool =
   let ga = g.cycleGroups.getOrDefault(a, InvalidFileIdx)
   result = ga != InvalidFileIdx and ga == g.cycleGroups.getOrDefault(b, InvalidFileIdx)
