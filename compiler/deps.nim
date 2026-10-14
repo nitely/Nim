@@ -151,6 +151,11 @@ proc findNifmake(): string =
   if not fileExists(result):
     result = findExe("nifmake")
 
+proc projectError(c: DepContext; msg: string) =
+  ## An error in the project. `nim ns` keeps going: nimsuggest reports those.
+  if c.config.cmd == cmdNs: localError(c.config, unknownLineInfo, msg)
+  else: rawMessage(c.config, errGenerated, msg)
+
 proc runNifler(c: DepContext; nimFile: string): bool =
   ## Run nifler deps on a file if needed. Returns true on success.
   ## NOTE: the `setLastModificationTime` coordination below is a known hack; its
@@ -777,8 +782,9 @@ proc includerSbifs*(conf: ConfigRef; targetFile: AbsoluteFile): seq[string] =
 proc traverseDeps(c: var DepContext; pair: FilePair; current: Node) =
   ## Process a module: run nifler and read deps
   if not runNifler(c, pair.nimFile):
-    rawMessage(c.config, errGenerated, "nifler failed for: " & pair.nimFile)
-    return
+    c.projectError("nifler failed for: " & pair.nimFile)
+    # `nim ns` keeps the imports of the module's last version that parsed.
+    if c.config.cmd != cmdNs or not fileExists(c.depsFile(pair)): return
   readDepsFile(c, pair, current)
 
 proc importPathsOf(n: PNode; res: var seq[string]) =
@@ -953,7 +959,7 @@ proc pruneDeadSpeculative(c: var DepContext) =
   for i in 0 ..< n:
     if hard[i] and c.nodes[i].missingHardImport.len > 0 and
        not isCompilesProbe(c, c.nodes[i], c.nodes[i].missingHardImport):
-      rawMessage(c.config, errGenerated,
+      c.projectError(
         c.nodes[i].files[0].nimFile & ": cannot open file: " &
         c.nodes[i].missingHardImport)
       reported = true
@@ -1049,6 +1055,12 @@ proc selectMainSemanticModules(c: DepContext) =
     if 0 in comp:
       for i in comp: c.config.icMainModules.add c.nodes[i].files[0].modname
   c.config.icMainModules.sort()
+
+proc mainGroup(c: DepContext): seq[int] =
+  ## The modules compiled together with the main module: it and its import cycle.
+  result = @[]
+  for comp in computeSCCs(c):
+    if 0 in comp: return comp
 
 proc semanticArgs(conf: ConfigRef): seq[string] =
   result = @["--icSemDir:" & conf.icSemDir.string,
@@ -1294,6 +1306,8 @@ proc generateFrontendBuildFile(c: DepContext; forwardedArgs: seq[string]): strin
   for sccId, comp in sccs:
     for nodeIdx in comp: sccOf[nodeIdx] = sccId
   for comp in sccs:
+    # `nim ns` leaves the main module to nimsuggest, which compiles it itself.
+    if c.config.cmd == cmdNs and 0 in comp: continue
     # Representative (project file for this invocation) = smallest node id, so a
     # component containing the root (node 0) is driven by the root.
     var members = comp
@@ -1936,9 +1950,21 @@ proc deriveFromSemDeps(c: var DepContext; afterRound: bool): bool =
 proc allSemmed(c: DepContext): bool =
   ## Whether every scheduled module has its semmed NIF.
   result = true
+  let skipped = if c.config.cmd == cmdNs: c.mainGroup else: @[]
   for node in c.nodes:
-    if not node.deferred and not fileExists(c.semmedFile(node.files[0])):
+    if not node.deferred and node.id notin skipped and
+        not fileExists(c.semmedFile(node.files[0])):
       return false
+
+proc reportToNimsuggest(c: DepContext) =
+  ## `nim ns`: prints, on lines of their own, where the semantic NIFs are and the
+  ## modules this run checked, so nimsuggest loads only NIFs nifmake checked.
+  let skipped = c.mainGroup
+  msgWriteln(c.config, "", {msgStdout, msgSkipHook})
+  msgWriteln(c.config, "icsemdir:" & c.config.icSemDir.string, {msgStdout, msgSkipHook})
+  for node in c.nodes:
+    if not node.deferred and node.id notin skipped:
+      msgWriteln(c.config, "icmodule:" & node.files[0].nimFile, {msgStdout, msgSkipHook})
 
 proc commandIc*(conf: ConfigRef; frontendOnly = false) =
   ## Main entry point for `nim ic`. With `frontendOnly` (used by `nim track` for
@@ -2156,7 +2182,7 @@ proc commandIc*(conf: ConfigRef; frontendOnly = false) =
         break
       if not discovered and exitCode == 0:
         # Only the deferred-import stops happened, and they taught us nothing.
-        rawMessage(conf, errGenerated,
+        c.projectError(
           "ic: modules stopped for imports discovered during sem, but " &
           "rescheduling found no new dependency")
         break
@@ -2174,6 +2200,8 @@ proc commandIc*(conf: ConfigRef; frontendOnly = false) =
         # exit code is derived from `errorCounter`.
         inc conf.errorCounter
         break
+
+    if conf.cmd == cmdNs: c.reportToNimsuggest()
 
     # Phase 2 — backend (whole-program `nim nifc`), run once over the now-final
     # graph. Kept a separate nifmake run so backend rebuilds are decided purely

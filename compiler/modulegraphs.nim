@@ -78,7 +78,7 @@ type
     icCnifFiles*: seq[string]     # `.c.nif` artifacts written by this run
     icFromSource: IntSet          # nimsuggest: modules compiled from source
     icStale: Table[int32, bool]   # nimsuggest: memoized `icNifIsStale`
-    icVerified: HashSet[string]   # nimsuggest: modules `nim ic`'s frontend
+    icVerified: HashSet[string]   # nimsuggest: modules `nim ns`
                                   # checked when nimsuggest started
     pendingMethodReplays*: seq[PSym] # method registrations loaded under
                                   # `nim nifc`, bucketed only after every
@@ -892,28 +892,9 @@ proc uniqueModuleName*(conf: ConfigRef; m: PSym): string =
   uniqueModuleName(conf, m, AbsoluteFile toFullPath(conf, FileIndex(m.position)))
 
 when not defined(nimKochBootstrap):
-  proc icCollectVerified(g: ModuleGraph; depsFile: string)
-
-  proc icVerify(g: ModuleGraph; module: FileIndex) =
-    if not g.icVerified.containsOrIncl(toFullPath(g.config, module)):
-      g.icCollectVerified(semanticFile(g.config,
-        cachedModuleSuffix(g.config, module), ".s.deps.bif").string)
-
-  proc icCollectVerified(g: ModuleGraph; depsFile: string) =
-    if fileExists(depsFile):
-      for dep in collectBifStrLits(depsFile):
-        g.icVerify(fileInfoIdx(g.config, AbsoluteFile dep))
-
-  proc icVerifyClosure*(g: ModuleGraph): bool =
-    ## Records the modules `nim ic`'s frontend just brought up to date: the
-    ## import closures of the main module and of system. False if the frontend
-    ## built nothing, not even system.
-    let main = cachedModuleSuffix(g.config, g.config.projectMainIdx)
-    g.icCollectVerified(string(g.config.icSemDir / RelativeDir"main" /
-      RelativeDir(main) / RelativeFile(main & ".s.deps.bif")))
-    let system = fileInfoIdx(g.config, g.config.libpath / RelativeFile"system.nim")
-    g.icVerify(system)
-    result = fileExists(semanticFile(g.config, cachedModuleSuffix(g.config, system), ".edges.bif"))
+  proc icVerify*(g: ModuleGraph; module: string) =
+    ## Records a module `nim ns` just brought up to date.
+    g.icVerified.incl module
 
   proc icNifIsStale*(g: ModuleGraph; fileIdx: FileIndex): bool =
     ## nimsuggest only reads NIFs that `nim ic`'s frontend checked when it
