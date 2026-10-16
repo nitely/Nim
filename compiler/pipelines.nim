@@ -738,7 +738,10 @@ proc compilePipelineSystemModule*(graph: ModuleGraph) =
     discard graph.compilePipelineModule(graph.config.m.systemFileIdx, {sfSystemModule})
     graph.withinSystem = false
 
-proc compilePipelineProject*(graph: ModuleGraph; projectFileIdx = InvalidFileIdx) =
+proc compilePipelineProject*(graph: ModuleGraph; projectFileIdx = InvalidFileIdx;
+                             asMain = true) =
+  ## `asMain = false` compiles `projectFileIdx` the way an import of the main
+  ## module is compiled.
   connectPipelineCallbacks(graph)
   let conf = graph.config
   wantMainModule(conf)
@@ -746,9 +749,10 @@ proc compilePipelineProject*(graph: ModuleGraph; projectFileIdx = InvalidFileIdx
 
   let systemFileIdx = fileInfoIdx(conf, conf.libpath / RelativeFile"system.nim")
   let projectFile = if projectFileIdx == InvalidFileIdx: conf.projectMainIdx else: projectFileIdx
-  conf.projectMainIdx2 = projectFile
+  let mainFlags = if asMain: {sfMainModule} else: {}
+  conf.projectMainIdx2 = if asMain: projectFile else: conf.projectMainIdx
 
-  var packSym = getPackage(graph, projectFile)
+  var packSym = getPackage(graph, if asMain: projectFile else: conf.projectMainIdx)
   if graph.config.cmd in {cmdM, cmdNifC} and graph.config.icProject.len > 0:
     # per-module IC children: the process' project file is the MODULE being
     # compiled, which would make its package the "main package" and unfilter
@@ -768,7 +772,7 @@ proc compilePipelineProject*(graph: ModuleGraph; projectFileIdx = InvalidFileIdx
     connectPipelineCallbacks(graph)
     # Record the main module so the IC loader won't materialise duplicate stubs
     # for its own symbols when a dependency (e.g. system) re-exports them.
-    if not graph.mainLoadsFromNif(projectFile):
+    if asMain and not graph.mainLoadsFromNif(projectFile):
       setIcMainModule(projectFile)
     graph.config.m.systemFileIdx = fileInfoIdx(graph.config,
         graph.config.libpath / RelativeFile"system.nim")
@@ -793,7 +797,7 @@ proc compilePipelineProject*(graph: ModuleGraph; projectFileIdx = InvalidFileIdx
       # system, so without this its macro-cache / CT globals would wait until the
       # first NIF import is processed. See finalizeLoadedModules.
       finalizeLoadedModules(graph)
-    discard graph.compilePipelineModule(projectFile, {sfMainModule})
+    discard graph.compilePipelineModule(projectFile, mainFlags)
   else:
     graph.compilePipelineSystemModule()
-    discard graph.compilePipelineModule(projectFile, {sfMainModule})
+    discard graph.compilePipelineModule(projectFile, mainFlags)

@@ -30,7 +30,7 @@ else:
 when not defined(nimcore):
   {.error: "nimcore MUST be defined for Nim's core tooling".}
 
-import strutils, os, osproc, parseopt, parseutils, sequtils, net, rdstdin, sexp
+import strutils, os, osproc, parseopt, parseutils, sequtils, net, rdstdin, sexp, streams
 # Do NOT import suggest. It will lead to weird bugs with
 # suggestionResultHook, because suggest.nim is included by sigmatch.
 # So we import that one instead.
@@ -106,6 +106,8 @@ var
   gLogging = defined(logging)
   gRefresh: bool
   gAutoBind = false
+  gQuery = "" # --ideQuery: answer this one query and exit (see `runQuery`)
+  gNsOutput = "" # what `nim ns` reported; handed to the processes of `runQuery`
   gMaxMemoryKb = # resident memory cap, --maxMemory:N (MB)
     when sizeof(int) == 8: # 64 bit CPU
       4000 * 1024
@@ -114,18 +116,94 @@ var
 
   requests: Channel[string]
   results: Channel[Suggest]
+  # Set in the process that answers a single query (see `runQuery`): its
+  # results go there instead of to `results`.
+  queryOut: Stream
 
 proc executeNoHooksV3(cmd: IdeCmd, file: AbsoluteFile, dirtyfile: AbsoluteFile, line, col: int; tag: string,
   graph: ModuleGraph);
 
+proc writeSuggest(s: Stream; x: Suggest) =
+  template str(v: string) =
+    s.write(int32 v.len)
+    s.write(v)
+  s.write(int32 ord(x.section))
+  s.write(int32 x.qualifiedPath.len)
+  for p in x.qualifiedPath: str p
+  str x.filePath
+  s.write(int64 x.line)
+  s.write(int64 x.column)
+  str x.doc
+  str x.forth
+  s.write(int32 x.quality)
+  s.write(x.isGlobal)
+  s.write(x.contextFits)
+  s.write(int32 ord(x.prefix))
+  s.write(x.symkind)
+  s.write(int64 x.scope)
+  s.write(int64 x.localUsages)
+  s.write(int64 x.globalUsages)
+  s.write(int64 x.tokenLen)
+  s.write(int64 x.version)
+  s.write(x.endLine)
+  s.write(int64 x.endCol)
+  let h = x.inlayHintInfo
+  s.write(h != nil)
+  if h != nil:
+    s.write(int32 ord(h.kind))
+    s.write(int64 h.line)
+    s.write(int64 h.column)
+    str h.label
+    s.write(h.paddingLeft)
+    s.write(h.paddingRight)
+    s.write(h.allowInsert)
+    str h.tooltip
+
+proc readSuggest(s: Stream): Suggest =
+  template str(): string = s.readStr(s.readInt32())
+  result = Suggest(section: IdeCmd(s.readInt32()))
+  for _ in 0..<s.readInt32(): result.qualifiedPath.add str()
+  result.filePath = str()
+  result.line = int s.readInt64()
+  result.column = int s.readInt64()
+  result.doc = str()
+  result.forth = str()
+  result.quality = range[0..100](s.readInt32())
+  result.isGlobal = s.readBool()
+  result.contextFits = s.readBool()
+  result.prefix = PrefixMatch(s.readInt32())
+  result.symkind = s.readUint8()
+  result.scope = int s.readInt64()
+  result.localUsages = int s.readInt64()
+  result.globalUsages = int s.readInt64()
+  result.tokenLen = int s.readInt64()
+  result.version = int s.readInt64()
+  result.endLine = s.readUint16()
+  result.endCol = int s.readInt64()
+  if s.readBool():
+    let h = SuggestInlayHint(kind: SuggestInlayHintKind(s.readInt32()))
+    h.line = int s.readInt64()
+    h.column = int s.readInt64()
+    h.label = str()
+    h.paddingLeft = s.readBool()
+    h.paddingRight = s.readBool()
+    h.allowInsert = s.readBool()
+    h.tooltip = str()
+    result.inlayHintInfo = h
+
+proc emit(s: Suggest) =
+  {.cast(gcsafe).}:
+    if queryOut != nil: writeSuggest(queryOut, s)
+    else: results.send(s)
+
 proc writelnToChannel(line: string) =
-  results.send(Suggest(section: ideMsg, doc: line))
+  emit(Suggest(section: ideMsg, doc: line))
 
 proc sugResultHook(s: Suggest) =
-  results.send(s)
+  emit(s)
 
 proc errorHook(conf: ConfigRef; info: TLineInfo; msg: string; sev: Severity) =
-  results.send(Suggest(section: ideChk, filePath: toFullPath(conf, info),
+  emit(Suggest(section: ideChk, filePath: toFullPath(conf, info),
     line: toLinenumber(info), column: toColumn(info), doc: msg,
     forth: $sev))
 
@@ -521,12 +599,38 @@ proc replEpc(x: ThreadParams) {.thread.} =
                          "unexpected call: " & epcApi
       quit errMessage
 
+proc forwardResults(input: Stream) =
+  try:
+    while not input.atEnd:
+      results.send(readSuggest(input))
+  except IOError, OSError:
+    myLog "query: truncated results: " & getCurrentExceptionMsg()
+
+proc runQuery(cmd: string) =
+  ## `--ideImports:nif`: answers `cmd` with a nimsuggest started for it with
+  ## `--ideQuery`, which loads the NIFs, compiles the buffers `cmd` names,
+  ## writes the results and exits. This process never compiles.
+  var p: Process = nil
+  try:
+    p = startProcess(getAppFilename(),
+      args = commandLineParams() & @["--ideQuery:" & cmd], options = {})
+    p.inputStream.write(gNsOutput)
+    p.inputStream.close()
+    forwardResults(p.outputStream)
+    let code = p.waitForExit()
+    if code != 0:
+      myLog "query failed: " & cmd & " (exit code " & $code & ")"
+  except OSError, IOError:
+    myLog "query: cannot run " & getAppFilename() & ": " & getCurrentExceptionMsg()
+  finally:
+    if p != nil: p.close()
+
 proc execCmd(cmd: string; graph: ModuleGraph; cachedMsgs: CachedMsgs) =
   let conf = graph.config
 
   template sentinel() =
     # send sentinel for the input reading thread:
-    results.send(Suggest(section: ideNone))
+    if queryOut == nil: results.send(Suggest(section: ideNone))
 
   template toggle(sw) =
     if sw in conf.globalOptions:
@@ -595,10 +699,14 @@ proc execCmd(cmd: string; graph: ModuleGraph; cachedMsgs: CachedMsgs) =
   i += parseInt(cmd, col, i)
   let tag = substr(cmd, i)
 
-  if conf.ideCmd == ideKnown:
-    results.send(Suggest(section: ideKnown, quality: ord(fileInfoKnown(conf, AbsoluteFile orig))))
-  elif conf.ideCmd == ideProject:
+  if conf.ideCmd == ideProject:
     results.send(Suggest(section: ideProject, filePath: string conf.projectFull))
+  elif conf.ideImportsFromNif and queryOut == nil:
+    # A saved file newer than its NIF is compiled from source by the query's
+    # process, so `changed` has nothing to do here.
+    if conf.ideCmd != ideChanged: runQuery(cmd)
+  elif conf.ideCmd == ideKnown:
+    emit(Suggest(section: ideKnown, quality: ord(fileInfoKnown(conf, AbsoluteFile orig))))
   else:
     if conf.ideCmd == ideChk:
       for cm in cachedMsgs: errorHook(conf, cm.info, cm.msg, cm.sev)
@@ -641,7 +749,7 @@ proc mainThread(graph: ModuleGraph) =
     else:
       os.sleep 250
       idle += 1
-    if idle == 20 and gRefresh and conf.suggestVersion < 3:
+    if idle == 20 and gRefresh and conf.suggestVersion < 3 and not conf.ideImportsFromNif:
       # we use some nimsuggest activity to enable a lazy recompile:
       conf.ideCmd = ideChk
       conf.writelnHook = proc (s: string) = discard
@@ -653,6 +761,41 @@ proc mainThread(graph: ModuleGraph) =
 
 var
   inputThread: Thread[ThreadParams]
+
+proc queryRoot(graph: ModuleGraph; cmd: string): FileIndex =
+  ## The module a query about a single file needs (the file, or the module that
+  ## includes it), or `InvalidFileIdx` when it needs the whole project.
+  result = InvalidFileIdx
+  var opc, file = ""
+  var i = parseIdent(cmd, opc, 0)
+  i += skipWhitespace(cmd, i)
+  if opc.normalize notin ["sug", "con", "def", "highlight", "outline", "chkfile",
+      "type", "declaration", "expand"] or i >= cmd.len or cmd[i] in {'0'..'9'}:
+    return
+  discard parseQuoted(cmd, file, i)
+  let fileIdx = fileInfoIdx(graph.config, AbsoluteFile file)
+  # A module `nim ns` checked is no include file.
+  if not graph.isIcVerified(toFullPath(graph.config, fileIdx)) and
+      graph.needsIncludeScan(fileIdx):
+    discard graph.registerIncluderFromNif(fileIdx)
+  result = if graph.inclToMod.hasKey(fileIdx): graph.parentModule(fileIdx) else: fileIdx
+  if result == graph.config.projectMainIdx: result = InvalidFileIdx
+
+proc useNsOutput(graph: ModuleGraph; output: string) =
+  let conf = graph.config
+  for line in output.splitLines:
+    if line.startsWith("icsemdir:"):
+      conf.icSemDir = AbsoluteDir(line.substr("icsemdir:".len))
+    elif line.startsWith("icmainsemdir:"):
+      conf.icMainSemDir = AbsoluteDir(line.substr("icmainsemdir:".len))
+    elif line.startsWith("icmainmodule:"):
+      conf.icMainModules.add line.substr("icmainmodule:".len)
+    elif line.startsWith("icmodule:"):
+      graph.icVerify(line.substr("icmodule:".len))
+  if conf.icSemDir.isEmpty:
+    stderr.writeLine "nimsuggest: --ideImports:nif: `nim ns` did not build " &
+      "the NIFs: is it from the same build as nimsuggest?\n" & output
+    quit 1
 
 proc runIcFrontend(graph: ModuleGraph) =
   ## Brings the project's NIFs up to date with `nim ns` and points the NIF
@@ -678,18 +821,8 @@ proc runIcFrontend(graph: ModuleGraph) =
   if not fileExists(format) or readFile(format) != icFormatVersion:
     fail nim & " writes NIFs in another format than nimsuggest reads (" &
       icFormatVersion & "): is it from the same build?\n" & output
-  for line in output.splitLines:
-    if line.startsWith("icsemdir:"):
-      conf.icSemDir = AbsoluteDir(line.substr("icsemdir:".len))
-    elif line.startsWith("icmainsemdir:"):
-      conf.icMainSemDir = AbsoluteDir(line.substr("icmainsemdir:".len))
-    elif line.startsWith("icmainmodule:"):
-      conf.icMainModules.add line.substr("icmainmodule:".len)
-    elif line.startsWith("icmodule:"):
-      graph.icVerify(line.substr("icmodule:".len))
-  if conf.icSemDir.isEmpty:
-    fail cmd & " did not build the NIFs: is " & nim &
-      " from the same build as nimsuggest?\n" & output
+  gNsOutput = output
+  useNsOutput(graph, output)
 
 proc mainCommand(graph: ModuleGraph) =
   let conf = graph.config
@@ -710,7 +843,12 @@ proc mainCommand(graph: ModuleGraph) =
   add(conf.searchPaths, conf.libpath)
 
   if conf.ideImportsFromNif:
-    runIcFrontend(graph)
+    if gQuery.len > 0:
+      # Nothing reads this process' stderr.
+      discard reopen(stderr, if gLogging: getHomeDir() / "nimsuggest.log"
+        else: (when defined(windows): "NUL" else: "/dev/null"), fmAppend)
+      useNsOutput(graph, stdin.readAll())
+    else: runIcFrontend(graph)
 
   conf.setErrorMaxHighMaybe # honor --errorMax even if it may not make sense here
   # do not print errors, but log them
@@ -727,9 +865,27 @@ proc mainCommand(graph: ModuleGraph) =
   hookMemMonitor(gMaxMemoryKb)
 
   # compile the project before showing any input so that we already
-  # can answer questions right away:
-  benchmark "Initial compilation":
-    compilePipelineProject(graph)
+  # can answer questions right away. Under `--ideImports:nif` every query is
+  # answered by a process of its own (`runQuery`), which loads only what the
+  # query needs.
+  if gQuery.len > 0:
+    let root = graph.queryRoot(gQuery)
+    benchmark "Initial compilation":
+      compilePipelineProject(graph, root, asMain = root == InvalidFileIdx)
+  elif not conf.ideImportsFromNif:
+    benchmark "Initial compilation":
+      compilePipelineProject(graph)
+
+  if gQuery.len > 0:
+    when defined(windows):
+      proc c_setmode(fd, mode: cint): cint {.importc: "_setmode", header: "<io.h>".}
+      discard c_setmode(getOsFileHandle(stdout).cint, 0x8000) # O_BINARY
+    queryOut = newFileStream(stdout)
+    conf.writelnHook = writelnToChannel
+    conf.suggestionResultHook = sugResultHook
+    execCmd(gQuery, graph, @[])
+    queryOut.flush()
+    quit 0
 
   open(requests)
   open(results)
@@ -824,6 +980,8 @@ proc processCmdLine*(pass: TCmdLinePass, cmd: string; conf: ConfigRef) =
         findProject = true
       of "clientprocessid":
         conf.clientProcessId = parseInt(p.val)
+      of "idequery":
+        gQuery = p.val
       else: processSwitch(pass, p, conf)
     of cmdArgument:
       let a = unixToNativePath(p.key)
@@ -883,9 +1041,14 @@ proc recompilePartially(graph: ModuleGraph, projectFileIdx = InvalidFileIdx) =
 
   GC_fullCollect()
 
+  # A query's process compiles the module of a single-file query like any
+  # import: from source, not as the main module.
+  let asMain = queryOut == nil or
+    projectFileIdx in [InvalidFileIdx, graph.config.projectMainIdx]
+  if not asMain: graph.icNoteFromSource(projectFileIdx)
   try:
     benchmark "Recompilation":
-      graph.compilePipelineProject(projectFileIdx)
+      graph.compilePipelineProject(projectFileIdx, asMain)
   except Exception as e:
     myLog fmt "Failed to recompile partially with the following error:\n {e.msg} \n\n {e.getStackTrace()}"
     try:

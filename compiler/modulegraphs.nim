@@ -896,6 +896,9 @@ when not defined(nimKochBootstrap):
     ## Records a module `nim ns` just brought up to date.
     g.icVerified.incl module
 
+  proc isIcVerified*(g: ModuleGraph; module: string): bool =
+    module in g.icVerified
+
   proc icNifIsStale*(g: ModuleGraph; fileIdx: FileIndex): bool =
     ## nimsuggest only reads NIFs that `nim ic`'s frontend checked when it
     ## started. A NIF is stale when its module failed to compile there (its
