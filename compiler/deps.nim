@@ -599,7 +599,7 @@ proc readDepsFile(c: var DepContext; pair: FilePair; current: Node) =
   # `current.id == 0` is the project main (rootNode); restored on exit so the
   # flag is correct for each parent frame between its child recursions.
   let prevScanningMain = c.scanningMain
-  c.scanningMain = current.id == 0
+  c.scanningMain = current.id == 0 and c.config.cmd != cmdNs
   defer: c.scanningMain = prevScanningMain
 
   var s = nifstreams.open(depsPath)
@@ -1051,6 +1051,7 @@ proc selectMainSemanticModules(c: DepContext) =
   ## An import cycle containing main is compiled together with its main role.
   ## Keep the whole group separate from imported versions shared by other programs.
   c.config.icMainModules = @[]
+  if c.config.cmd == cmdNs: return
   for comp in computeSCCs(c):
     if 0 in comp:
       for i in comp: c.config.icMainModules.add c.nodes[i].files[0].modname
@@ -1312,7 +1313,7 @@ proc generateFrontendBuildFile(c: DepContext; forwardedArgs: seq[string]): strin
     # The root module (node 0) is the program's real entry point; mark it so
     # `isMainModule` resolves to true only for it (every module otherwise gets
     # `sfMainModule` for NIF writing under `nim m`).
-    if members[0] == 0:
+    if members[0] == 0 and c.config.cmd != cmdNs:
       b.addStrLit "--isMainModule:on"
       b.addStrLit "--nimcache:" & c.config.icMainSemDir.string
     # For a real cycle, tell the compiler which modules form the group so it
@@ -1946,18 +1947,22 @@ proc allSemmed(c: DepContext): bool =
     if not node.deferred and not fileExists(c.semmedFile(node.files[0])):
       return false
 
-proc reportToNimsuggest(c: DepContext) =
+proc reportToNimsuggest(c: DepContext; cacheDir: string) =
   ## `nim ns`: prints, on lines of their own, where the semantic NIFs are and the
   ## modules this run checked, so nimsuggest loads only NIFs nifmake checked.
-  template report(s: string) = msgWriteln(c.config, s, {msgStdout, msgSkipHook})
-  report ""
-  report "icsemdir:" & c.config.icSemDir.string
-  report "icmainsemdir:" & c.config.icMainSemDir.string
+  ## The same report is left in `cacheDir/nimsuggest.txt`.
+  var lines = @["", "icsemdir:" & c.config.icSemDir.string,
+    "icmainsemdir:" & c.config.icMainSemDir.string,
+    "icconfig:" & c.config.icPreparsedConfig]
   for suffix in c.config.icMainModules:
-    report "icmainmodule:" & suffix
+    lines.add "icmainmodule:" & suffix
   for node in c.nodes:
-    if not node.deferred:
-      report "icmodule:" & node.files[0].nimFile
+    lines.add (if node.deferred: "icdeferred:" else: "icmodule:") & node.files[0].nimFile
+  for line in lines:
+    msgWriteln(c.config, line, {msgStdout, msgSkipHook})
+  let report = cacheDir / "nimsuggest.txt"
+  writeFile(report & ".tmp", lines.join("\n"))
+  moveFile(report & ".tmp", report)
 
 proc commandIc*(conf: ConfigRef; frontendOnly = false) =
   ## Main entry point for `nim ic`. With `frontendOnly` (used by `nim track` for
@@ -2194,7 +2199,7 @@ proc commandIc*(conf: ConfigRef; frontendOnly = false) =
         inc conf.errorCounter
         break
 
-    if conf.cmd == cmdNs: c.reportToNimsuggest()
+    if conf.cmd == cmdNs: c.reportToNimsuggest(cacheDir)
 
     # Phase 2 — backend (whole-program `nim nifc`), run once over the now-final
     # graph. Kept a separate nifmake run so backend rebuilds are decided purely
