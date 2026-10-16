@@ -30,7 +30,7 @@ import std/compilesettings
 # quirks) and blew CI's job timeout.
 const icTests = ["tic.nim", "tv3_import.nim", "tic_import_edit.nim", "tic_taint.nim",
   "tic_include_edit.nim", "tic_import_error.nim", "tic_include_error.nim",
-  "tic_instance_owner.nim", "tic_main_error.nim"]
+  "tic_instance_owner.nim", "tic_main_error.nim", "tic_import_module.nim"]
 
 proc parseTest(filename: string; epcMode=false): Test =
   const cursorMarker = "#[!]#"
