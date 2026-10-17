@@ -152,7 +152,7 @@ proc findNifmake(): string =
     result = findExe("nifmake")
 
 proc projectError(c: DepContext; msg: string) =
-  ## An error in the project. `nim ns` keeps going: nimsuggest reports those.
+  ## An error in the project. `nim ns` keeps going: nimsuggest2 reports those.
   if c.config.cmd == cmdNs: localError(c.config, unknownLineInfo, msg)
   else: rawMessage(c.config, errGenerated, msg)
 
@@ -1948,15 +1948,14 @@ proc allSemmed(c: DepContext): bool =
       return false
 
 proc reportToNimsuggest(c: DepContext; cacheDir: string) =
-  ## `nim ns`: prints, on lines of their own, where the semantic NIFs are and the
-  ## modules this run checked, so nimsuggest loads only NIFs nifmake checked.
-  ## The same report is left in `cacheDir/nimsuggest.txt`.
-  var lines = @["", "icsemdir:" & c.config.icSemDir.string,
+  ## `nim ns`: writes `cacheDir/nimsuggest.txt`, one line each for where the
+  ## semantic NIFs are, the precompiled config, and every module this run
+  ## checked (`icmodule:`) or could not (`icdeferred:`), so nimsuggest2 loads
+  ## only NIFs nifmake checked.
+  var lines = @["icsemdir:" & c.config.icSemDir.string,
     "icconfig:" & c.config.icPreparsedConfig]
   for node in c.nodes:
     lines.add (if node.deferred: "icdeferred:" else: "icmodule:") & node.files[0].nimFile
-  for line in lines:
-    msgWriteln(c.config, line, {msgStdout, msgSkipHook})
   let report = cacheDir / "nimsuggest.txt"
   writeFile(report & ".tmp", lines.join("\n"))
   moveFile(report & ".tmp", report)

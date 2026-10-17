@@ -774,6 +774,7 @@ proc runCI(cmd: string) =
       # in bundleNimsuggest depending on some environment variable when we are in CI. One advantage
       # of rebuilding is this won't affect bin/nimsuggest when running runCI locally
       execFold("build nimsuggest_testing", "nim c -o:bin/nimsuggest_testing -d:release nimsuggest/nimsuggest")
+      execFold("build nimsuggest2_testing", "nim c -o:bin/nimsuggest2_testing -d:release nimsuggest/nimsuggest2")
       execFold("Run nimsuggest tests", "nim r nimsuggest/tester")
 
 

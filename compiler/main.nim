@@ -460,8 +460,8 @@ proc mainCommand*(graph: ModuleGraph) =
     else:
       rawMessage(conf, errGenerated, "nim track not available in bootstrap build")
   of cmdNs:
-    # `nim ns`: nimsuggest's `--ideImports:nif` frontend. Builds the project's
-    # NIFs and prints where they are and which modules it brought up to date.
+    # `nim ns`: nimsuggest2's IC frontend. Builds the project's NIFs and writes a
+    # report of where they are and which modules it brought up to date.
     conf.errorMax = high(int)
     setUseIc(true)
     wantMainModule(conf)

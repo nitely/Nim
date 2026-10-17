@@ -279,8 +279,8 @@ proc runIdeQuery*(conf: ConfigRef) =
     let tid = findSym(qm.buf.pool, foundName)
     scanBuf(conf, qm, section, tid, foundName, seen)
 
-# nimsuggest: the symbol at a position and its occurrences, read from a module's
-# `.s.bif`; the caller resolves the names to symbols.
+# nimsuggest2's one-shot: the symbol at a position and its occurrences, read from
+# a module's `.s.bif`; the caller resolves the names to symbols.
 
 const routineTags = ["proc", "func", "method", "converter", "macro", "template", "iterator"]
 

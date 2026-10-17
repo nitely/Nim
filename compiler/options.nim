@@ -232,7 +232,7 @@ type
     cmdIc  # generate .build.nif for nifmake
     cmdIcConfig # `nim ic`'s precompiled-config producer (writes config snapshots)
     cmdTrack # `nim track --def/--usages`: IC frontend build + NIF scan for IDE queries
-    cmdNs # `nim ns`: IC frontend build for nimsuggest's `--ideImports:nif`
+    cmdNs # `nim ns`: IC frontend build for nimsuggest2
 
 const
   cmdBackends* = {cmdCompileToC, cmdCompileToCpp, cmdCompileToOC,

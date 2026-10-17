@@ -659,7 +659,7 @@ proc mainThread(graph: ModuleGraph) =
 var
   inputThread: Thread[ThreadParams]
 
-proc useNsOutput(graph: ModuleGraph; output: string) =
+proc useNsReport(graph: ModuleGraph; output: string) =
   let conf = graph.config
   for line in output.splitLines:
     if line.startsWith("icsemdir:"):
@@ -670,34 +670,37 @@ proc useNsOutput(graph: ModuleGraph; output: string) =
     elif line.startsWith("icdeferred:"):
       gNsModules.incl line.substr("icdeferred:".len)
 
-proc runIcFrontend(graph: ModuleGraph) =
-  ## Brings the project's NIFs up to date with `nim ns` and points the NIF
-  ## loader at them. Modules that fail to compile there are
-  ## compiled from source; not being able to run `nim ns` is an error.
+proc nsReport(conf: ConfigRef): string =
+  ## Where `nim ns` leaves its report (see `useNsReport`).
+  getNimcacheDir(conf).string / "nimsuggest.txt"
+
+proc runNimNs(graph: ModuleGraph) =
+  ## Brings the project's NIFs and `nsReport` up to date with `nim ns`. Modules
+  ## that fail to compile there are compiled from source by the queries; not
+  ## being able to run `nim ns` is an error.
   let conf = graph.config
   let nim = getAppDir() / addFileExt("nim", ExeExt)
   let cache = getNimcacheDir(conf).string
   let cmd = quoteShellCommand([nim, "ns", "--nimcache:" & cache, conf.projectFull.string])
   template fail(msg: string) =
-    stderr.writeLine "nimsuggest: --ideImports:nif: " & msg
+    stderr.writeLine "nimsuggest2: nim ns: " & msg
     quit 1
   var output = ""
   var exitCode = -1
-  benchmark "IC frontend":
+  benchmark "nim ns":
     try:
       (output, exitCode) = execCmdEx(cmd, workingDir = conf.projectPath.string)
     except OSError as e:
       fail "cannot run " & cmd & ": " & e.msg
-  myLog "IC frontend: " & cmd & " exit code: " & $exitCode
+  myLog "nim ns: " & cmd & " exit code: " & $exitCode
   if exitCode != 0: myLog output
   let format = cache / "ic.version"
   if not fileExists(format) or readFile(format) != icFormatVersion:
-    fail nim & " writes NIFs in another format than nimsuggest reads (" &
+    fail nim & " writes NIFs in another format than nimsuggest2 reads (" &
       icFormatVersion & "): is it from the same build?\n" & output
-  useNsOutput(graph, output)
-  if conf.icSemDir.isEmpty:
-    fail cmd & " did not build the NIFs: is " & nim &
-      " from the same build as nimsuggest?\n" & output
+  if not fileExists(nsReport(conf)):
+    fail cmd & " wrote no report: is " & nim &
+      " from the same build as nimsuggest2?\n" & output
 
 proc mainCommand(graph: ModuleGraph) =
   let conf = graph.config
@@ -1795,7 +1798,7 @@ else:
     discard reopen(stderr, if gLogging: getHomeDir() / "nimsuggest.log"
       else: (when defined(windows): "NUL" else: "/dev/null"), fmAppend)
     conf.ideActive = true
-    let preReport = getNimcacheDir(conf).string / "nimsuggest.txt"
+    let preReport = nsReport(conf)
     if fileExists(preReport):
       for line in readFile(preReport).splitLines:
         if line.startsWith("icconfig:"):
@@ -1825,11 +1828,9 @@ else:
     var opc = ""
     discard parseIdent(cmd, opc, 0)
     opc = opc.normalize
-    let report = getNimcacheDir(conf).string / "nimsuggest.txt"
-    if opc == "changed" or not fileExists(report):
-      runIcFrontend(graph)
-    else:
-      useNsOutput(graph, readFile(report))
+    if opc == "changed" or not fileExists(nsReport(conf)):
+      runNimNs(graph)
+    useNsReport(graph, readFile(nsReport(conf)))
     let q = parseQuery(cmd)
     let file = q.file
     case opc
