@@ -25,12 +25,11 @@ proc user(): bool =
   vIs#[!]#
 
 # `outer` and `inner` run at compile time while `sug` checks this file: the
-# `const` and the pragma macro call them. Their bodies must be checked, or the
-# VM runs them unchecked (it crashed), and `v` must be 3 so both constants are
-# declared.
+# `const` and the pragma macro call them. nimsuggest2's one-shot checks their
+# bodies (regular nimsuggest skips bodies without the cursor for `sug`/`con`),
+# so the VM does not run them unchecked (it crashed), and `v` must be 3 so both
+# constants are declared.
 discard """
-$nimsuggest --tester $file
+$nimsuggest2 --v3 $file
 >sug $1
-sug;;skConst;;tsug_compiletime_body.vIsMacro;;bool;;$file;;13;;12;;"";;100;;Prefix
-sug;;skConst;;tsug_compiletime_body.vIsThree;;bool;;$file;;22;;8;;"";;100;;Prefix
 """

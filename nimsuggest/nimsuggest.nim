@@ -1065,7 +1065,7 @@ proc findSymDataWithFallback(graph: ModuleGraph, fileIndex, moduleToCompile: Fil
     result = graph.findSymDataAll(trackPos)
   finally:
     conf.ideCmd = savedIdeCmd
-    conf.m.trackPos = TLineInfo(fileIndex: trackPosInvalidFileIdx)
+    conf.m.trackPos = if gOneShot: TLineInfo(fileIndex: trackPosInvalidFileIdx) else: default(TLineInfo)
     graph.suggestErrors = savedErrors
     graph.suggestSymbols = savedSymbols
   for s in result:
@@ -1377,7 +1377,7 @@ proc executeNoHooksV3(cmd: IdeCmd, file: AbsoluteFile, dirtyfile: AbsoluteFile, 
       conf.m.trackPos = newLineInfo(fileIndex, line, col)
       conf.m.trackPosAttached = false
     else:
-      conf.m.trackPos = TLineInfo(fileIndex: trackPosInvalidFileIdx)
+      conf.m.trackPos = if gOneShot: TLineInfo(fileIndex: trackPosInvalidFileIdx) else: default(TLineInfo)
       # An include file's includer must be (re)compiled from source so the
       # include body is re-sem'd; force it dirty since the include file itself
       # is not a module the dirty machinery tracks.
