@@ -32,4 +32,6 @@ proc user(): bool =
 discard """
 $nimsuggest2 --v3 $file
 >sug $1
+sug;;skConst;;tsug_compiletime_body.vIsMacro;;bool;;$file;;13;;12;;"";;100;;Prefix
+sug;;skConst;;tsug_compiletime_body.vIsThree;;bool;;$file;;22;;8;;"";;100;;Prefix
 """
