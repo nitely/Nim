@@ -1,7 +1,7 @@
 # nimsuggest2's one-shot: `changed` runs `nim ns`, then each query loads the
-# NIFs it built. Saved-file `highlight`/`def` come from the NIFs without
-# compiling; the file sent as its own buffer is compiled. The main file is
-# compiled like an import: its `when isMainModule` block is not checked.
+# NIFs it built and compiles the queried file, saved or sent as its own buffer.
+# The main file is compiled like an import: its `when isMainModule` block is not
+# checked.
 
 import std/strutils
 
@@ -18,6 +18,7 @@ $nimsuggest2 $file
 >known $file
 true
 >highlight $file:8:6
+def;;skProc;;tns2_oneshot.shout;;proc (s: string): string{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;8;;5;;""
 def;;skProc;;tns2_oneshot.shout;;proc (s: string): string{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;8;;5;;""
 use;;skProc;;tns2_oneshot.shout;;proc (s: string): string{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;10;;8;;""
 >highlight $file;$file:8:6

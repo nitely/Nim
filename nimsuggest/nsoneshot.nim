@@ -20,7 +20,7 @@ when not defined(nimcore):
 
 import compiler / [options, commands, modules, msgs, pipelines, sigmatch, ast, idents,
   modulegraphs, prefixmatches, lineinfos, cmdlinehelper, pathutils, condsyms,
-  syntaxes, suggestsymdb, lexer, ast2nif, idetools]
+  syntaxes, suggestsymdb, lexer]
 
 const HighestSuggestProtocolVersion = 4
 const Usage = """
@@ -605,90 +605,6 @@ proc parseQuery(cmd: string; conf: ConfigRef): Query =
   i += parseInt(cmd, result.col, i)
   result.tag = substr(cmd, i)
 
-const SourceIdentChars = IdentChars + {'\x80'..'\xFF'}
-
-proc sourceLine(src: var Table[FileIndex, seq[string]]; conf: ConfigRef;
-                fileIdx: FileIndex; line: int): string =
-  if fileIdx notin src:
-    src[fileIdx] =
-      try: readFile(toFullPath(conf, fileIdx)).splitLines
-      except IOError: @[]
-  let lines = src[fileIdx]
-  result = if line in 1..lines.len: lines[line - 1] else: ""
-
-proc identAround(text: string; col: int): tuple[ident: string, start: int] =
-  ## The identifier of `text` that `col` is in.
-  if col < 0 or col >= text.len or text[col] notin SourceIdentChars: return ("", col)
-  var a = col
-  while a > 0 and text[a - 1] in SourceIdentChars: dec a
-  var b = col
-  while b < text.len and text[b] in SourceIdentChars: inc b
-  result = (text.substr(a, b - 1), a)
-
-proc symAtPos(graph: ModuleGraph; n: PNode; target: TLineInfo; ident: string): PSym =
-  ## The symbol named `ident` that `n` has at `target`.
-  result = nil
-  if n == nil: return
-  if n.kind == nkSym:
-    if n.info.fileIndex == target.fileIndex and n.info.line == target.line and
-        n.info.col <= target.col and target.col <= n.info.col + ident.len and
-        cmpIgnoreStyle(n.sym.name.s, ident) == 0:
-      result = n.sym
-    return
-  if nfLazyBody in n.flags and forceLazyBodyHook != nil: forceLazyBodyHook(n)
-  for i in 0..<n.safeLen:
-    result = graph.symAtPos(n[i], target, ident)
-    if result != nil: return
-
-proc answerFromNif(graph: ModuleGraph; q: Query): bool =
-  ## Answers `highlight`, `def`, `use` and `dus` about a saved file whose NIF
-  ## is fresh from the NIFs, without compiling or loading the import closure:
-  ## the loader opens the NIFs the symbols need. False when they cannot.
-  let conf = graph.config
-  let cmd = q.cmd
-  if cmd notin {ideHighlight, ideDef, ideUse, ideDus} or q.dirty.len > 0 or
-      graph.icNifIsStale(gRoot):
-    return false
-  var src = initTable[FileIndex, seq[string]]()
-  let fileIdx = fileInfoIdx(conf, AbsoluteFile q.file)
-  let ident = identAround(src.sourceLine(conf, fileIdx, q.line), q.col).ident
-  if ident.len == 0: return false
-  let target = newLineInfo(fileIdx, q.line, q.col)
-  let bif = toNifFilename(conf, gRoot)
-  let at = ideSymAt(conf, bif, target, ident)
-  if at.name.len == 0 or (cmd != ideDef and isFieldNifName(at.name)): return false
-  var sym = resolveHookSym(ast.program, at.name)
-  if sym == nil:
-    for r in at.routines:
-      let owner = resolveHookSym(ast.program, r)
-      if owner != nil and owner.kind in routineKinds:
-        sym = graph.symAtPos(owner.ast, target, ident)
-        if sym != nil: break
-  if sym == nil or cmpIgnoreStyle(sym.name.s, ident) != 0: return false
-  myLog fmt "answering {q.opc} from NIF: {at.name}"
-
-  var infos = @[sym.info]
-  if cmd != ideDef:
-    infos.add ideOccurrences(conf, bif, at.name)
-  if cmd in {ideUse, ideDus}:
-    for m in gNsModules:
-      let other = toNifFilename(conf, fileInfoIdx(conf, AbsoluteFile m))
-      if other != bif: infos.add ideOccurrences(conf, other, at.name)
-  var found: seq[TLineInfo] = @[]
-  for info in infos:
-    if cmd == ideHighlight and info.fileIndex != fileIdx: continue
-    let (id, start) = identAround(src.sourceLine(conf, info.fileIndex, info.line.int), info.col)
-    if start == info.col and cmpIgnoreStyle(id, sym.name.s) == 0 and
-        not found.anyIt(it.exactEquals(info)):
-      found.add info
-  if found.len == 0: return false
-  found.sort(proc (a, b: TLineInfo): int =
-    cmp((a.fileIndex.int32, a.line, a.col), (b.fileIndex.int32, b.line, b.col)))
-  conf.ideCmd = cmd
-  for info in found:
-    graph.suggestResult(sym, info)
-  result = true
-
 proc queryRoot(graph: ModuleGraph; q: Query): FileIndex =
   ## The module a command compiles: the file it names or the module including
   ## that file; the project's main file when it names none.
@@ -806,7 +722,6 @@ proc oneShot*() =
     graph.suggestErrors.mgetOrPut(info.fileIndex, @[]).add suggest
   conf.suggestionResultHook = proc (s: Suggest) = echo s
   gRoot = graph.queryRoot(q)
-  if graph.answerFromNif(q): quit 0
 
   let fileIndex =
     if q.cmd == ideGlobalSymbols: InvalidFileIdx

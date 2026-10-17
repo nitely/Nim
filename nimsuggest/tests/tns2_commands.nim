@@ -1,6 +1,6 @@
 # One query per command nimsuggest2's one-shot answers; `changed` builds the
-# NIFs first. On saved code without a dirty file, `def`/`use`/`dus`/`highlight`
-# come from the NIFs; the rest compile this file.
+# NIFs first, then each query loads them and compiles this file (the commands
+# that need no compile excepted).
 
 import mns2lib
 
@@ -39,6 +39,7 @@ use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, rai
 use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;15;;8;;""
 use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;16;;8;;""
 >highlight $file:8:6
+def;;skLet;;tns2_commands.double.y;;int;;$file;;8;;6;;""
 def;;skLet;;tns2_commands.double.y;;int;;$file;;8;;6;;""
 use;;skLet;;tns2_commands.double.y;;int;;$file;;9;;2;;""
 >type $file:13:4
