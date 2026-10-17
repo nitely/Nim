@@ -56,10 +56,8 @@ proc myLog(s: string) =
 
 const
   seps = {':', ';', ' ', '\t'}
-  Help = "usage: sug|con|def|use|dus|chk|mod|highlight|outline|outline2|known|project file.nim[;dirtyfile.nim]:line:col\n" &
-         "type 'quit' to quit\n" &
-         "type 'debug' to toggle debug mode on/off\n" &
-         "type 'terse' to toggle terse mode on/off"
+  Help = "usage: sug|con|def|use|dus|chk|highlight|outline2|known|project file.nim[;dirtyfile.nim]:line:col\n" &
+         "type 'quit' to quit"
   Capabilities = ["con", "unknownFile", "outline2"]
 
 proc parseQuoted(cmd: string; outp: var string; start: int): int =
@@ -85,11 +83,11 @@ proc compileRoot(graph: ModuleGraph) =
   ## source reuses the instances it brings.
   if not graph.icNifIsStale(gRoot):
     benchmark "Load":
-      graph.compilePipelineProject(gRoot, asMain = false)
+      graph.compilePipelineProject(gRoot)
     graph.markDirty gRoot
   graph.icNoteFromSource(gRoot)
   benchmark "Compilation":
-    graph.compilePipelineProject(gRoot, asMain = false)
+    graph.compilePipelineProject(gRoot)
 
 func deduplicateSymInfoPair[SymInfoPair](xs: seq[SymInfoPair]): seq[SymInfoPair] =
   result = newSeqOfCap[SymInfoPair](xs.len)
@@ -244,59 +242,6 @@ const
   searchableSymKinds = {skField, skEnumField, skIterator, skMethod, skFunc, skProc, skConverter, skTemplate}
 
 
-proc findByTLineInfo(trackPos: TLineInfo, infoPairs: SuggestFileSymbolDatabase):
-    ref SymInfoPair =
-  result = nil
-  if infoPairs.fileIndex == trackPos.fileIndex:
-    for i in infoPairs.lineInfo.low..infoPairs.lineInfo.high:
-      let s = infoPairs.getSymInfoPair(i)
-      if s.info.exactEquals trackPos:
-        new(result)
-        result[] = s
-        break
-
-proc outlineNode(graph: ModuleGraph, n: PNode, endInfo: TLineInfo, infoPairs: SuggestFileSymbolDatabase): bool =
-  result = false
-
-  proc checkSymbol(sym: PSym, info: TLineInfo): bool =
-    result = (sym.owner.kind in {skModule, skType} or sym.kind in {skProc, skMethod, skIterator, skTemplate, skType})
-
-  if n.kind == nkSym and n.sym.checkSymbol(n.info):
-    graph.suggestResult(n.sym, n.sym.info, ideOutline, endInfo.line, endInfo.col)
-    return true
-  elif n.kind in {nkIdent, nkAccQuoted}:
-    let symData = findByTLineInfo(n.info, infoPairs)
-    if symData != nil and symData.sym.checkSymbol(symData.info):
-       let sym = symData.sym
-       graph.suggestResult(sym, sym.info, ideOutline, endInfo.line, endInfo.col)
-       return true
-
-proc handleIdentOrSym(graph: ModuleGraph, n: PNode, endInfo: TLineInfo, infoPairs: SuggestFileSymbolDatabase): bool =
-  result = false
-  for child in n:
-    if child.kind in {nkIdent, nkAccQuoted, nkSym}:
-      if graph.outlineNode(child, endInfo, infoPairs):
-        return true
-    elif child.kind == nkPostfix:
-      if graph.handleIdentOrSym(child, endInfo, infoPairs):
-        return true
-
-proc iterateOutlineNodes(graph: ModuleGraph, n: PNode, infoPairs: SuggestFileSymbolDatabase) =
-  var matched = true
-  if n.kind == nkIdent:
-    let symData = findByTLineInfo(n.info, infoPairs)
-    if symData != nil and symData.sym.kind == skEnumField and symData.info.exactEquals(symData.sym.info):
-       let sym = symData.sym
-       graph.suggestResult(sym, sym.info, ideOutline, n.endInfo.line, n.endInfo.col)
-  elif (n.kind in {nkFuncDef, nkProcDef, nkMethodDef, nkIteratorDef, nkTypeDef, nkMacroDef, nkTemplateDef, nkConverterDef, nkEnumFieldDef, nkConstDef}):
-    matched = handleIdentOrSym(graph, n, n.endInfo, infoPairs)
-  else:
-    matched = false
-
-  if n.kind != nkFormalParams:
-    for child in n:
-      graph.iterateOutlineNodes(child, infoPairs)
-
 proc calculateExpandRange(n: PNode, info: TLineInfo): TLineInfo =
   if ((n.kind in {nkFuncDef, nkProcDef, nkIteratorDef, nkTemplateDef, nkMethodDef, nkConverterDef} and
           n.info.exactEquals(info)) or
@@ -421,9 +366,6 @@ proc answer(graph: ModuleGraph; cmd: IdeCmd; file: string; fileIndex: FileIndex;
         if fs.sym[i] == sym.sym:
           let s = fs.getSymInfoPair(i)
           graph.suggestResult(s.sym, s.info)
-  of ideOutline:
-    let n = parseFile(fileIndex, graph.cache, conf)
-    graph.iterateOutlineNodes(n, graph.fileSymbols(fileIndex).deduplicateSymInfoPair(false))
   of ideOutline2:
     let n = parseFile(fileIndex, graph.cache, conf)
     if n != nil:
@@ -576,10 +518,8 @@ proc parseQuery(cmd: string; conf: ConfigRef): Query =
     of "def": ideDef
     of "use": ideUse
     of "dus": ideDus
-    of "mod": ideMod
     of "chk": ideChk
     of "highlight": ideHighlight
-    of "outline": ideOutline
     of "known": ideKnown
     of "project": ideProject
     of "changed": ideChanged
@@ -700,7 +640,7 @@ proc oneShot*() =
     runNimNs(graph)
   useNsReport(graph, readFile(nsReport(conf)))
   case q.opc
-  of "changed", "recompile", "debug", "terse", "quit":
+  of "changed", "recompile", "quit":
     quit 0
   of "project":
     echo conf.projectFull.string

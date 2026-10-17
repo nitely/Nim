@@ -22,8 +22,6 @@ $nimsuggest2 $file
 $file
 >known $file
 true
->debug
->terse
 >def $file:14:9
 def;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;""
 >declaration $file:14:9
@@ -50,9 +48,6 @@ sug;;skField;;value;;int;;*mns2lib.nim;;3;;4;;""
 con;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;""
 >expand $file:8:10
 expand;;skUnknown;;;;;;;;8;;10;;"x + x";;0;;8;;18
->outline $file:1:0
-outline;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;""
-outline;;skProc;;tns2_commands.unused;;proc (s: string){.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;11;;5;;""
 >outline2 $file:1:0
 outline;;skProc;;tns2_commands.double;;;;$file;;7;;5;;""
 outline;;skProc;;tns2_commands.unused;;;;$file;;11;;5;;""
