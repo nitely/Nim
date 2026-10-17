@@ -30,8 +30,8 @@ proc user(): bool =
 # so the VM does not run them unchecked (it crashed), and `v` must be 3 so both
 # constants are declared.
 discard """
-$nimsuggest2 --v3 $file
+$nimsuggest2 $file
 >sug $1
-sug;;skConst;;tsug_compiletime_body.vIsMacro;;bool;;$file;;13;;12;;"";;100;;Prefix
-sug;;skConst;;tsug_compiletime_body.vIsThree;;bool;;$file;;22;;8;;"";;100;;Prefix
+sug;;skConst;;tsug_compiletime_body.vIsMacro;;bool;;$file;;13;;12;;""
+sug;;skConst;;tsug_compiletime_body.vIsThree;;bool;;$file;;22;;8;;""
 """

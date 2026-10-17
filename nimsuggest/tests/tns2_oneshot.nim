@@ -13,18 +13,18 @@ when isMainModule:
   undefinedSymbol()
 
 discard """
-$nimsuggest2 --v3 $file
+$nimsuggest2 $file
 >changed $file
 >known $file
 true
 >highlight $file:8:6
-def;;skProc;;tns2_oneshot.shout;;proc (s: string): string{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;8;;5;;"";;100
-use;;skProc;;tns2_oneshot.shout;;proc (s: string): string{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;10;;8;;"";;100
+def;;skProc;;tns2_oneshot.shout;;proc (s: string): string{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;8;;5;;""
+use;;skProc;;tns2_oneshot.shout;;proc (s: string): string{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;10;;8;;""
 >highlight $file;$file:8:6
-def;;skProc;;tns2_oneshot.shout;;proc (s: string): string{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;8;;5;;"";;100
-def;;skProc;;tns2_oneshot.shout;;proc (s: string): string{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;8;;5;;"";;100
-use;;skProc;;tns2_oneshot.shout;;proc (s: string): string{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;10;;8;;"";;100
+def;;skProc;;tns2_oneshot.shout;;proc (s: string): string{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;8;;5;;""
+def;;skProc;;tns2_oneshot.shout;;proc (s: string): string{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;8;;5;;""
+use;;skProc;;tns2_oneshot.shout;;proc (s: string): string{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;10;;8;;""
 >def $file:6:14
-def;;skModule;;strutils;;;;*/pure/strutils.nim;;1;;0;;*;;100
+def;;skModule;;strutils;;;;*/pure/strutils.nim;;1;;0;;*
 >chkFile $file;$file:0:0
 """

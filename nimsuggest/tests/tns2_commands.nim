@@ -16,7 +16,7 @@ discard double(b.#[!]#value)
 discard double(#[!]#b.value)
 
 discard """
-$nimsuggest2 --v3 $file
+$nimsuggest2 $file
 >changed $file
 >project $file
 $file
@@ -25,38 +25,38 @@ true
 >debug
 >terse
 >def $file:14:9
-def;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;"";;100
+def;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;""
 >declaration $file:14:9
-declaration;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;"";;100
+declaration;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;""
 >use $file:14:9
-def;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;"";;100
-use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;14;;8;;"";;100
-use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;15;;8;;"";;100
-use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;16;;8;;"";;100
+def;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;""
+use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;14;;8;;""
+use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;15;;8;;""
+use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;16;;8;;""
 >dus $file:14:9
-def;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;"";;100
-use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;14;;8;;"";;100
-use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;15;;8;;"";;100
-use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;16;;8;;"";;100
+def;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;""
+use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;14;;8;;""
+use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;15;;8;;""
+use;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;16;;8;;""
 >highlight $file:8:6
-def;;skLet;;tns2_commands.double.y;;int;;$file;;8;;6;;"";;100
-use;;skLet;;tns2_commands.double.y;;int;;$file;;9;;2;;"";;100
+def;;skLet;;tns2_commands.double.y;;int;;$file;;8;;6;;""
+use;;skLet;;tns2_commands.double.y;;int;;$file;;9;;2;;""
 >type $file:13:4
-type;;skType;;mns2lib.Box;;Box;;*mns2lib.nim;;2;;2;;"";;100
+type;;skType;;mns2lib.Box;;Box;;*mns2lib.nim;;2;;2;;""
 >sug $1
-sug;;skField;;value;;int;;*mns2lib.nim;;3;;4;;"";;100;;Prefix
+sug;;skField;;value;;int;;*mns2lib.nim;;3;;4;;""
 >con $2
-con;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;"";;100
+con;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;""
 >expand $file:8:10
 expand;;skUnknown;;;;;;;;8;;10;;"x + x";;0;;8;;18
 >outline $file:1:0
-outline;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;"";;100;;9;;3
-outline;;skProc;;tns2_commands.unused;;proc (s: string){.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;11;;5;;"";;100;;11;;32
+outline;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;""
+outline;;skProc;;tns2_commands.unused;;proc (s: string){.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;11;;5;;""
 >outline2 $file:1:0
-outline;;skProc;;tns2_commands.double;;;;$file;;7;;5;;"";;100;;9;;3
-outline;;skProc;;tns2_commands.unused;;;;$file;;11;;5;;"";;100;;11;;32
+outline;;skProc;;tns2_commands.double;;;;$file;;7;;5;;""
+outline;;skProc;;tns2_commands.unused;;;;$file;;11;;5;;""
 >globalSymbols double
-def;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;"";;100
+def;;skProc;;tns2_commands.double;;proc (x: int): int{.noSideEffect, gcsafe, raises: <inferred> [].};;$file;;7;;5;;""
 >chkFile $file;$file:0:0
 chk;;skUnknown;;;;Hint;;$file;;11;;5;;"\'unused\' is declared but not used [XDeclaredButNotUsed]";;0
 >chk $file:0:0

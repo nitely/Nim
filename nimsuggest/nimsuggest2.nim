@@ -8,13 +8,13 @@
 #
 
 ## A nimsuggest that never compiles. It takes the same arguments and speaks the
-## same protocol over a socket (`--port`, `--autobind`), one command at a time;
-## every command is answered by `nimsuggest2 --one-shot` (see
-## `nimsuggest.oneShot`), whose output it forwards. The NIFs are brought up to
-## date at startup and on `changed`.
+## same protocol (v4) over a socket (`--port`, `--autobind`), one command at a
+## time; every command is answered by `nimsuggest2 --one-shot` (see `nsoneshot`),
+## whose output it forwards. The NIFs are brought up to date at startup and on
+## `changed`.
 
 import std/[os, osproc, net, parseopt, strutils, streams]
-import nimsuggest, procmonitor
+import nsoneshot, procmonitor
 
 proc runOneShot(cmd: string; client: Socket) =
   var client = client
