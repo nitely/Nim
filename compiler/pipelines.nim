@@ -742,7 +742,7 @@ proc compilePipelineSystemModule*(graph: ModuleGraph) =
 proc compilePipelineProject*(graph: ModuleGraph; projectFileIdx = InvalidFileIdx;
                              asMain = true) =
   ## `asMain = false` compiles `projectFileIdx` the way an import of the main
-  ## module is compiled.
+  ## module is compiled: no module is the main module.
   connectPipelineCallbacks(graph)
   let conf = graph.config
   wantMainModule(conf)
@@ -751,7 +751,7 @@ proc compilePipelineProject*(graph: ModuleGraph; projectFileIdx = InvalidFileIdx
   let systemFileIdx = fileInfoIdx(conf, conf.libpath / RelativeFile"system.nim")
   let projectFile = if projectFileIdx == InvalidFileIdx: conf.projectMainIdx else: projectFileIdx
   let mainFlags = if asMain: {sfMainModule} else: {}
-  conf.projectMainIdx2 = if asMain: projectFile else: conf.projectMainIdx
+  conf.projectMainIdx2 = if asMain: projectFile else: InvalidFileIdx
 
   var packSym = getPackage(graph, if asMain: projectFile else: conf.projectMainIdx)
   if graph.config.cmd in {cmdM, cmdNifC} and graph.config.icProject.len > 0:
