@@ -80,19 +80,6 @@ template benchmark(benchmarkName: untyped, code: untyped) =
     let elapsedStr = elapsed.formatFloat(format = ffDecimal, precision = 3)
     myLog "CPU Time [" & benchmarkName & "] " & elapsedStr & "s"
 
-proc clearInstCache(graph: ModuleGraph; module: FileIndex) =
-  if module == InvalidFileIdx:
-    graph.typeInstCache.clear()
-    graph.procInstCache.clear()
-    return
-  for id in toSeq(graph.typeInstCache.keys):
-    if id.module == module.int: graph.typeInstCache.del id
-  for id in toSeq(graph.procInstCache.keys):
-    if id.module == module.int: graph.procInstCache.del id
-  for tbl in mitems(graph.attachedOps):
-    for id in toSeq(tbl.keys):
-      if id.module == module.int and sfOverridden in tbl[id].flags: tbl.del id
-
 proc compileRoot(graph: ModuleGraph) =
   ## A root with a fresh NIF is loaded from it first, so that compiling it from
   ## source reuses the instances it brings.
@@ -100,10 +87,6 @@ proc compileRoot(graph: ModuleGraph) =
     benchmark "Load":
       graph.compilePipelineProject(gRoot, asMain = false)
     graph.markDirty gRoot
-    graph.clearInstCache(
-      if graph.config.ideCmd in {ideUse, ideDus, ideGlobalSymbols, ideChk,
-          ideInlayHints, ideExpand}: InvalidFileIdx
-      else: gRoot)
   graph.icNoteFromSource(gRoot)
   benchmark "Compilation":
     graph.compilePipelineProject(gRoot, asMain = false)
@@ -219,7 +202,6 @@ proc findSymDataWithFallback(graph: ModuleGraph; fileIndex: FileIndex;
   conf.ideCmd = ideNone
   conf.m.trackPos = trackPos
   conf.m.trackPosAttached = false
-  graph.clearInstCache(gRoot)
   graph.markDirty gRoot
   graph.compileRoot()
   result = graph.findSymDataAll(trackPos)
