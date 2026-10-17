@@ -1952,10 +1952,7 @@ proc reportToNimsuggest(c: DepContext; cacheDir: string) =
   ## modules this run checked, so nimsuggest loads only NIFs nifmake checked.
   ## The same report is left in `cacheDir/nimsuggest.txt`.
   var lines = @["", "icsemdir:" & c.config.icSemDir.string,
-    "icmainsemdir:" & c.config.icMainSemDir.string,
     "icconfig:" & c.config.icPreparsedConfig]
-  for suffix in c.config.icMainModules:
-    lines.add "icmainmodule:" & suffix
   for node in c.nodes:
     lines.add (if node.deferred: "icdeferred:" else: "icmodule:") & node.files[0].nimFile
   for line in lines:

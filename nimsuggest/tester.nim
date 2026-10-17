@@ -28,9 +28,7 @@ import std/compilesettings
 # IC path; running every test under IC dominated the suite's wall-clock (each test
 # recompiles `system` cold into NIF, plus a few warm-cache-only ordering/highlight
 # quirks) and blew CI's job timeout.
-const icTests = ["tic.nim", "tv3_import.nim", "tic_import_edit.nim", "tic_taint.nim",
-  "tic_include_edit.nim", "tic_import_error.nim", "tic_include_error.nim",
-  "tic_instance_owner.nim", "tic_main_error.nim", "tic_import_module.nim"]
+const icTests = ["tic.nim", "tv3_import.nim"]
 
 proc parseTest(filename: string; epcMode=false): Test =
   const cursorMarker = "#[!]#"
@@ -44,7 +42,6 @@ proc parseTest(filename: string; epcMode=false): Test =
   result.startup = @[]
   var tmp = open(result.dest, fmWrite)
   var specSection = 0
-  var cmdSeen = false
   var markers = newSeq[string]()
   var i = 1
   for x in lines(filename):
@@ -69,9 +66,8 @@ proc parseTest(filename: string; epcMode=false): Test =
           result.disabled = false
       elif x.startsWith("$nimsuggest"):
         result.cmd = x % ["nimsuggest", nimsug, "file", filename, "lib", libpath]
-        cmdSeen = true
       elif x.startsWith("!"):
-        if not cmdSeen:
+        if result.cmd.len == 0:
           result.startup.add x
         else:
           result.script.add((x, ""))
@@ -287,31 +283,6 @@ proc skipDisabledTest(test: Test): bool =
     echo "disabled: " & test.filename
   result = test.disabled
 
-proc startEpc(cl: seq[string]; p: var Process; socket: var Socket) =
-  p = startProcess(command=cl[0], args=cl[1 .. ^1],
-                   options={poStdErrToStdOut, poUsePath,
-                   poInteractive, poDaemon})
-  let outp = p.outputStream
-  # read the port number:
-  when defined(posix):
-    var a = newStringOfCap(120)
-    discard outp.readLine(a)
-  else:
-    var i = 0
-    while not osproc.hasData(p) and i < 100:
-      os.sleep(50)
-      inc i
-    let a = outp.readAll().strip()
-  var port: int
-  try:
-    port = parseInt(a)
-  except ValueError:
-    echo "Error parsing port number: " & a
-    echo outp.readAll()
-    quit 1
-  socket = newSocket()
-  socket.connect("localhost", Port(port))
-
 proc runEpcTest(filename: string): int =
   let s = parseTest(filename, true)
   if s.skipDisabledTest: return 0
@@ -327,19 +298,34 @@ proc runEpcTest(filename: string): int =
   else:
     s.cmd.replace("--tester", "--epc --v2 --log")
   let cl = parseCmdLine(epccmd)
-  var p: Process = nil
+  var p = startProcess(command=cl[0], args=cl[1 .. ^1],
+                       options={poStdErrToStdOut, poUsePath,
+                       poInteractive, poDaemon})
+  let outp = p.outputStream
   var report = ""
-  var socket: Socket = nil
+  var socket = newSocket()
   try:
-    startEpc(cl, p, socket)
+    # read the port number:
+    when defined(posix):
+      var a = newStringOfCap(120)
+      discard outp.readLine(a)
+    else:
+      var i = 0
+      while not osproc.hasData(p) and i < 100:
+        os.sleep(50)
+        inc i
+      let a = outp.readAll().strip()
+    var port: int
+    try:
+      port = parseInt(a)
+    except ValueError:
+      echo "Error parsing port number: " & a
+      echo outp.readAll()
+      quit 1
+    socket.connect("localhost", Port(port))
+
     for req, resp in items(s.script):
-      if req == "!restart":
-        socket.close()
-        p.terminate()
-        discard p.waitForExit()
-        close(p)
-        startEpc(cl, p, socket)
-      elif not runCmd(req, s.dest):
+      if not runCmd(req, s.dest):
         socket.sendEpcStr(req)
         let sx = parseSexp(socket.recvEpc())
         if not req.startsWith("mod "):
@@ -351,7 +337,7 @@ proc runEpcTest(filename: string): int =
       # potentially masked by another one in case `socket.sendEpcStr` raises
       # (e.g. if socket couldn't connect in the 1st place)
   finally:
-    if p != nil: close(p)
+    close(p)
   if report.len > 0:
     echo "==== EPC ========================================"
     echo report
@@ -380,15 +366,6 @@ proc runMemCapTest(): int =
   else:
     echo "mem cap test: OK"
 
-proc startTester(cl: seq[string]): Process =
-  result = startProcess(command=cl[0], args=cl[1 .. ^1],
-                        options={poStdErrToStdOut, poUsePath,
-                        poInteractive, poDaemon})
-  # read and ignore anything nimsuggest says at startup:
-  var a = newStringOfCap(120)
-  while result.outputStream.readLine(a):
-    if a == DummyEof: break
-
 proc runTest(filename: string): int =
   let s = parseTest filename
   if s.skipDisabledTest: return 0
@@ -396,29 +373,31 @@ proc runTest(filename: string): int =
     if not runCmd(cmd, s.dest):
       quit "invalid command: " & cmd
   let cl = parseCmdLine(s.cmd)
-  var p = startTester(cl)
+  var p = startProcess(command=cl[0], args=cl[1 .. ^1],
+                       options={poStdErrToStdOut, poUsePath,
+                       poInteractive, poDaemon})
+  let outp = p.outputStream
+  let inp = p.inputStream
   var report = ""
   var a = newStringOfCap(120)
   try:
+    # read and ignore anything nimsuggest says at startup:
+    while outp.readLine(a):
+      if a == DummyEof: break
     for req, resp in items(s.script):
-      if req == "!restart":
-        p.terminate()
-        discard p.waitForExit()
-        close(p)
-        p = startTester(cl)
-      elif not runCmd(req, s.dest):
-        p.inputStream.writeLine(req)
-        p.inputStream.flush()
+      if not runCmd(req, s.dest):
+        inp.writeLine(req)
+        inp.flush()
         var answer = ""
-        while p.outputStream.readLine(a):
+        while outp.readLine(a):
           if a == DummyEof: break
           answer.add a
           answer.add '\L'
         doReport(filename, answer, resp, report)
   finally:
     try:
-      p.inputStream.writeLine("quit")
-      p.inputStream.flush()
+      inp.writeLine("quit")
+      inp.flush()
     except IOError, OSError:
       # assume it's SIGPIPE, ie, the child already died
       discard

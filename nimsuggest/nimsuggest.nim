@@ -664,10 +664,6 @@ proc useNsOutput(graph: ModuleGraph; output: string) =
   for line in output.splitLines:
     if line.startsWith("icsemdir:"):
       conf.icSemDir = AbsoluteDir(line.substr("icsemdir:".len))
-    elif line.startsWith("icmainsemdir:"):
-      conf.icMainSemDir = AbsoluteDir(line.substr("icmainsemdir:".len))
-    elif line.startsWith("icmainmodule:"):
-      conf.icMainModules.add line.substr("icmainmodule:".len)
     elif line.startsWith("icmodule:"):
       graph.icVerify(line.substr("icmodule:".len))
       gNsModules.incl line.substr("icmodule:".len)
@@ -720,9 +716,6 @@ proc mainCommand(graph: ModuleGraph) =
     quit "cannot find file: " & conf.projectFull.string
 
   add(conf.searchPaths, conf.libpath)
-
-  if conf.ideImportsFromNif:
-    runIcFrontend(graph)
 
   conf.setErrorMaxHighMaybe # honor --errorMax even if it may not make sense here
   # do not print errors, but log them
@@ -1817,6 +1810,7 @@ else:
         conf.backend != backendJs and optWasNimscript notin conf.globalOptions:
       initOrcDefines(conf)
     conf.ideImportsFromNif = true
+    conf.ideNsNifs = true
     conf.setCmd(cmdM)
     conf.ideActive = true
     defineSymbol(conf.symbols, $conf.backend)
