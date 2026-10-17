@@ -771,8 +771,6 @@ proc oneShot*() =
   conf.suggestVersion = 4
   self.initDefinesProg(conf, "nimsuggest")
   self.processCmdLineAndProjectPath(conf)
-  discard reopen(stderr, if gLogging: getHomeDir() / "nimsuggest.log"
-    else: (when defined(windows): "NUL" else: "/dev/null"), fmAppend)
   conf.ideActive = true
   let preReport = nsReport(conf)
   if fileExists(preReport):

@@ -16,12 +16,22 @@
 import std/[os, osproc, net, parseopt, strutils, streams]
 import nsoneshot, procmonitor
 
+proc forwardStderr(child: Stream) {.thread.} =
+  var buf = newString(4096)
+  while true:
+    let n = child.readData(buf[0].addr, buf.len)
+    if n <= 0: break
+    stderr.write buf[0 ..< n]
+  stderr.flushFile()
+
 proc runOneShot(cmd: string; client: Socket) =
   var client = client
   var p: Process = nil
+  var errors: Thread[Stream]
   try:
     p = startProcess(getAppFilename(),
       args = @["--one-shot"] & commandLineParams(), options = {})
+    createThread(errors, forwardStderr, p.errorStream)
     p.inputStream.write(cmd & "\n")
     p.inputStream.close()
     let output = p.outputStream
@@ -34,13 +44,17 @@ proc runOneShot(cmd: string; client: Socket) =
           client.send(buf[0 ..< n])
         except OSError:
           client = nil
+    joinThread(errors)
     let code = p.waitForExit()
     if code != 0:
       stderr.writeLine "nimsuggest2: `" & cmd & "` exited with code " & $code
   except OSError, IOError:
     stderr.writeLine "nimsuggest2: cannot run `" & cmd & "`: " & getCurrentExceptionMsg()
   finally:
-    if p != nil: p.close()
+    if p != nil:
+      if p.running: p.kill()
+      if errors.running: joinThread(errors)
+      p.close()
 
 proc serve(port: Port; address: string; autoBind: bool) =
   let server = newSocket()
