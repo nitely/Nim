@@ -97,7 +97,8 @@ when defined(posix):
       try:
         sendSignal(Pid(pid), 0)
       except:
-        discard kill(Pid(getCurrentProcessId()), cint(SIGTERM))
+        let self = getpid()
+        discard kill(if getpgrp() == self: -self else: self, cint(SIGTERM))
 
 when defined(windows):
   proc monitorClientProcessIdThreadProc(pid: int) {.thread.} =
@@ -107,8 +108,75 @@ when defined(windows):
       discard closeHandle(process)
     quit(0)
 
+when defined(posix):
+  proc monitorParentThreadProc(parent: int) {.thread.} =
+    while getppid() == Pid(parent):
+      sleep(1000)
+    let group = getpgrp()
+    discard kill(if group == Pid(parent): -group else: getpid(), cint(SIGKILL))
+
+when defined(windows):
+  type
+    JobObjectBasicLimitInformation {.pure.} = object
+      perProcessUserTimeLimit, perJobUserTimeLimit: int64
+      limitFlags: DWORD
+      minimumWorkingSetSize, maximumWorkingSetSize: int
+      activeProcessLimit: DWORD
+      affinity: int
+      priorityClass, schedulingClass: DWORD
+
+    IoCounters {.pure.} = object
+      readOperationCount, writeOperationCount, otherOperationCount,
+        readTransferCount, writeTransferCount, otherTransferCount: uint64
+
+    JobObjectExtendedLimitInformation {.pure.} = object
+      basicLimitInformation: JobObjectBasicLimitInformation
+      ioInfo: IoCounters
+      processMemoryLimit, jobMemoryLimit, peakProcessMemoryUsed,
+        peakJobMemoryUsed: int
+
+  const
+    JobObjectExtendedLimitInformationClass = cint(9)
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = DWORD(0x2000)
+
+  proc createJobObject(attributes, name: pointer): Handle {.
+    stdcall, dynlib: "kernel32", importc: "CreateJobObjectW".}
+  proc setInformationJobObject(job: Handle; infoClass: cint; info: pointer;
+                               length: DWORD): WINBOOL {.
+    stdcall, dynlib: "kernel32", importc: "SetInformationJobObject".}
+  proc assignProcessToJobObject(job, process: Handle): WINBOOL {.
+    stdcall, dynlib: "kernel32", importc: "AssignProcessToJobObject".}
+
+  var job: Handle
+
 var tid: Thread[int]
 var memTid: Thread[int]
+var parentTid: Thread[int]
+
+proc ownProcessTree*() =
+  ## The processes started from now on, and the ones they start, die with this
+  ## one: they share its process group (POSIX; not from a terminal, so Ctrl-C
+  ## still reaches it), or its job object, killed when it closes (Windows).
+  when defined(posix):
+    if isatty(0) == 0:
+      discard setpgid(0, 0)
+  elif defined(windows):
+    job = createJobObject(nil, nil)
+    if job != 0:
+      var info = JobObjectExtendedLimitInformation()
+      info.basicLimitInformation.limitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+      if setInformationJobObject(job, JobObjectExtendedLimitInformationClass,
+                                 addr info, DWORD(sizeof(info))) == 0 or
+          assignProcessToJobObject(job, getCurrentProcess()) == 0:
+        discard closeHandle(job)
+        job = 0
+
+proc hookParentMonitor*() =
+  ## Kill the process when its parent dies, with its process group when the
+  ## parent leads it (see `ownProcessTree`). Windows needs none: the parent's
+  ## job object does it.
+  when defined(posix):
+    createThread(parentTid, monitorParentThreadProc, int(getppid()))
 
 proc hookProcMonitor*(pid: int) =
   when defined(posix) or defined(windows):

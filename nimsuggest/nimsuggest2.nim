@@ -86,6 +86,7 @@ proc main() =
     if kind in {cmdLongOption, cmdShortOption}:
       case key.normalize
       of "one-shot", "info", "help", "h":
+        hookParentMonitor()
         oneShot()
       of "autobind": autoBind = true
       of "port": port = Port(parseInt(val))
@@ -94,6 +95,7 @@ proc main() =
       else: discard
   if not autoBind and port == Port(0):
     quit "nimsuggest2: only --port and --autobind are supported"
+  ownProcessTree()
   if clientProcessId != 0:
     hookProcMonitor(clientProcessId)
   runOneShot("changed", nil)
